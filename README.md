@@ -7,7 +7,7 @@ A full-stack tool for building, testing, and perfecting brand color palettes. Ad
 ## Features
 
 - **Build & Test** — add colors manually or paste hex values in bulk; live contrast matrix updates as you build
-- **Smart Suggestions™** — analyzes your whole palette and recommends what it's missing (fill hue gaps, add contrast, balance temperature, anchor light/dark values) with the most accessible colors surfaced first
+- **Smart Suggestion** — analyzes your whole palette and recommends what it's missing (fill hue gaps, add contrast, balance temperature, anchor light/dark values) with the most accessible colors surfaced first
 - **One-click fixes** — every failing contrast pair shows a before/after preview and an Accept Fix button that replaces the color in-palette instantly
 - **Harmonize** — color wheel visualization, harmony score, and issue cards (hue deviation, flat lightness, temperature imbalance, no dominant color) with suggested fixes
 - **Assign Roles** — map colors to Hero / Accent / Neutral roles with automatic recommendations and a live brand preview
