@@ -84,12 +84,11 @@ function makeFixLabel(origHex, fixHex) {
   } catch { return 'Use this accessible color instead'; }
 }
 
-// Adjust fg lightness until contrast vs bg meets targetRatio; returns best hex found
-function findAccessibleForeground(fg, bg, targetRatio = 4.5) {
+// Adjust fg lightness (and optionally saturation) until contrast vs bg meets targetRatio
+function findAccessibleForeground(fg, bg, targetRatio = 4.5, allowSatReduction = false) {
   try {
     const bgL = chroma(bg).hsl()[2];
     const [h, s] = chroma(fg).hsl();
-    // Move toward black (dark bg) or white (light bg)
     const lightTarget = bgL < 0.5 ? 0.94 : 0.06;
     let best = fg;
     let bestRatio = chroma.contrast(fg, bg);
@@ -100,6 +99,18 @@ function findAccessibleForeground(fg, bg, targetRatio = 4.5) {
       const ratio = chroma.contrast(candidate, bg);
       if (ratio > bestRatio) { best = candidate; bestRatio = ratio; }
       if (ratio >= targetRatio) return { hex: candidate.toUpperCase(), ratio: Math.round(ratio * 100) / 100 };
+    }
+    // Second pass with reduced saturation when allowSatReduction is true
+    if (allowSatReduction && bestRatio < targetRatio) {
+      const sReduced = Math.max(0.01, s * 0.7);
+      for (let step = 0; step <= 20; step++) {
+        const t = step / 20;
+        const l = clamp(chroma(fg).hsl()[2] + (lightTarget - chroma(fg).hsl()[2]) * t, 0.04, 0.96);
+        const candidate = chroma.hsl((h ?? 0), sReduced, l).hex();
+        const ratio = chroma.contrast(candidate, bg);
+        if (ratio > bestRatio) { best = candidate; bestRatio = ratio; }
+        if (ratio >= targetRatio) return { hex: candidate.toUpperCase(), ratio: Math.round(ratio * 100) / 100 };
+      }
     }
     return { hex: best.toUpperCase(), ratio: Math.round(bestRatio * 100) / 100 };
   } catch { return null; }
@@ -640,6 +651,23 @@ app.post('/api/harmonize', (req, res) => {
     });
   }
 
+  // ── Make harmony suggestions accessibility-aware ──────────────────────────
+  // Find the lightest color as the reference background for contrast checks
+  const refBg = colorData.reduce((a, b) => b.l > a.l ? b : a, colorData[0]);
+  for (const issue of issues) {
+    if (!issue.suggestion) continue;
+    try {
+      const contrast = chroma.contrast(issue.suggestion, refBg.hex);
+      if (contrast < 2.5 && refBg.l > 0.65) {
+        const adjusted = findAccessibleForeground(issue.suggestion, refBg.hex, 3.0);
+        if (adjusted && adjusted.hex !== issue.suggestion) {
+          issue.suggestion = adjusted.hex;
+          issue.accessibilityAdjusted = true;
+        }
+      }
+    } catch { /* skip */ }
+  }
+
   // ── Detect harmony type ───────────────────────────────────────────────────
   const diffs = colorData.slice(1).map(c => ((c.h - baseHue) + 360) % 360);
   let detectedType = 'Custom';
@@ -714,6 +742,26 @@ app.post('/api/harmonize', (req, res) => {
 
 // ── POST /api/analyze ─────────────────────────────────────────────────────────
 
+function inferRole(h, s, l) {
+  if (l < 0.25) return 'text';
+  if (l > 0.78) return 'background';
+  if (s > 0.45) return 'accent';
+  if (s < 0.12) return 'neutral';
+  return 'ui';
+}
+
+function getPairWeight(fgRole, bgRole) {
+  if (fgRole === 'text' && (bgRole === 'background' || bgRole === 'neutral')) return { weight: 1.0, importance: 'critical' };
+  if (fgRole === 'ui'   && (bgRole === 'background' || bgRole === 'neutral')) return { weight: 0.7, importance: 'important' };
+  if (fgRole === 'accent' && (bgRole === 'background' || bgRole === 'neutral')) return { weight: 0.5, importance: 'standard' };
+  if (fgRole === 'text' && bgRole === 'accent') return { weight: 0.5, importance: 'standard' };
+  if (fgRole === 'ui' && bgRole === 'ui') return { weight: 0.3, importance: 'low' };
+  if (fgRole === 'accent' && bgRole === 'accent') return { weight: 0.05, importance: 'decorative' };
+  if (bgRole === 'background' || bgRole === 'neutral') return { weight: 0.2, importance: 'low' };
+  if (fgRole === 'background' || (fgRole === 'background' && bgRole === 'background')) return { weight: 0.0, importance: 'decorative' };
+  return { weight: 0.2, importance: 'low' };
+}
+
 function explainContrastFailure(fg, bg) {
   try {
     const fgL = chroma(fg).hsl()[2];
@@ -721,19 +769,19 @@ function explainContrastFailure(fg, bg) {
     const fgMid = fgL > 0.3 && fgL < 0.7;
     const bgMid = bgL > 0.3 && bgL < 0.7;
     if (fgMid && bgMid) {
-      return `Both colors are mid-toned (${Math.round(fgL*100)}% and ${Math.round(bgL*100)}% lightness) — need one dark and one light to achieve readable contrast.`;
+      return `Too similar in tone for text — both sit in the mid-range (${Math.round(fgL*100)}% and ${Math.round(bgL*100)}% lightness). Suitable for decorative accents only.`;
     }
     if (fgMid) {
       const dir = bgL > 0.5 ? 'darker' : 'lighter';
-      return `Foreground is mid-toned at ${Math.round(fgL*100)}% lightness — needs to be ${dir} to contrast against this ${bgL > 0.5 ? 'light' : 'dark'} background.`;
+      return `Foreground is mid-toned at ${Math.round(fgL*100)}% lightness — works for large headings, but not body copy. Try a ${dir} variant.`;
     }
     if (bgMid) {
-      return `Background at ${Math.round(bgL*100)}% lightness is in the mid-tone danger zone — difficult for any foreground to achieve 4.5:1 against it.`;
+      return `Background is in the mid-range at ${Math.round(bgL*100)}% lightness — hard for most foregrounds to achieve readable contrast here.`;
     }
     if (Math.abs(fgL - bgL) < 0.2) {
-      return `Colors are too similar in lightness (${Math.round(fgL*100)}% vs ${Math.round(bgL*100)}%) — need greater lightness difference for readable text.`;
+      return `Too close in tone (${Math.round(fgL*100)}% vs ${Math.round(bgL*100)}% lightness) — good for hover states, not readable text.`;
     }
-    return `Contrast falls short of the 4.5:1 threshold required for normal-sized text (WCAG AA).`;
+    return `Contrast works for large text and icons, but not body copy.`;
   } catch { return 'Contrast is too low for readable text.'; }
 }
 
@@ -847,65 +895,62 @@ function analyzeIssues(colorData, meanHue, avgS) {
 
 function labelScore(score, max) {
   const p = score / max;
-  if (p >= 0.85) return 'Excellent';
-  if (p >= 0.65) return 'Good';
-  if (p >= 0.40) return 'Fair';
+  if (p >= 0.90) return 'Exceptional';
+  if (p >= 0.80) return 'Excellent';
+  if (p >= 0.70) return 'Strong';
+  if (p >= 0.60) return 'Good';
   return 'Needs Work';
 }
 
 function computeHealth(colorData, pairs, issues) {
   const n = colorData.length;
 
-  // Accessibility (0–30)
-  let accessibility = n < 2 ? 15 : 0;
+  // Accessibility (0–35): weighted pass rate — decorative pairs barely count
+  let accessibility = 17.5; // neutral default when no pairs
   if (pairs.length > 0) {
-    const pct = pairs.filter(p => p.normalAA).length / pairs.length;
-    if (pct === 1)       accessibility = 30;
-    else if (pct >= 0.75) accessibility = 22;
-    else if (pct >= 0.5)  accessibility = 15;
-    else if (pct >= 0.25) accessibility = 8;
-    else                  accessibility = 3;
+    const weightedPass  = pairs.reduce((s, p) => s + p.weight * (p.normalAA ? 1 : 0), 0);
+    const weightedTotal = pairs.reduce((s, p) => s + p.weight, 0);
+    accessibility = weightedTotal > 0 ? (weightedPass / weightedTotal) * 35 : 17.5;
+    accessibility = Math.round(accessibility);
   }
 
-  // Tonal Balance (0–20)
+  // Balance (0–15): lightness spread
   const lVals = colorData.map(c => c.l);
   const lSpread = n > 1 ? Math.max(...lVals) - Math.min(...lVals) : 0;
-  let tonalBalance = 0;
-  if      (lSpread > 0.65) tonalBalance = 20;
-  else if (lSpread > 0.45) tonalBalance = 15;
-  else if (lSpread > 0.30) tonalBalance = 10;
-  else if (lSpread > 0.15) tonalBalance = 5;
-  if (colorData.some(c => c.l > 0.75) && colorData.some(c => c.l < 0.25) && tonalBalance < 20)
-    tonalBalance = Math.min(tonalBalance + 5, 20);
+  let balance = 0;
+  if      (lSpread > 0.65) balance = 15;
+  else if (lSpread > 0.45) balance = 11;
+  else if (lSpread > 0.30) balance = 7;
+  else if (lSpread > 0.15) balance = 4;
+  if (colorData.some(c => c.l > 0.75) && colorData.some(c => c.l < 0.25) && balance < 15)
+    balance = Math.min(balance + 4, 15);
 
-  // Functional Variety (0–20)
+  // Versatility (0–20): functional zone coverage
   let zones = 0;
-  if (colorData.some(c => c.l < 0.25))                           zones++;
-  if (colorData.some(c => c.l > 0.75))                           zones++;
+  if (colorData.some(c => c.l < 0.25))                              zones++;
+  if (colorData.some(c => c.l > 0.75))                              zones++;
   if (colorData.some(c => c.s > 0.5 && c.l > 0.35 && c.l < 0.65)) zones++;
-  if (colorData.some(c => c.s < 0.15))                           zones++;
-  const functionalVariety = Math.round((zones / 4) * 20);
+  if (colorData.some(c => c.s < 0.15))                              zones++;
+  const versatility = Math.round((zones / 4) * 20);
 
-  // Cohesion (0–15)
-  let cohesion = 15;
-  cohesion -= issues.filter(i => i.id === 'redundant-pair' || i.id === 'temperature-skew').length * 5;
+  // Harmony (0–30): cohesion + neutral support combined
+  let harmony = 30;
+  harmony -= issues.filter(i => i.id === 'redundant-pair').length * 8;
+  harmony -= issues.filter(i => i.id === 'temperature-skew').length * 6;
   const hueDiversity = new Set(colorData.filter(c => c.s > 0.15).map(c => Math.floor(c.h / 60))).size;
-  if (hueDiversity > 4) cohesion -= 4;
-  cohesion = Math.max(0, cohesion);
-
-  // Neutral Support (0–15)
+  if (hueDiversity > 4) harmony -= 4;
   const nc = colorData.filter(c => c.s < 0.15).length;
-  const neutralSupport = nc >= 3 ? 15 : nc === 2 ? 11 : nc === 1 ? 7 : 0;
+  harmony -= nc >= 3 ? 0 : nc === 2 ? 2 : nc === 1 ? 6 : 12;
+  harmony = Math.max(0, Math.round(harmony));
 
-  const overall = accessibility + tonalBalance + functionalVariety + cohesion + neutralSupport;
+  const overall = accessibility + balance + versatility + harmony;
   return {
     overall,
     breakdown: {
-      accessibility:     { score: accessibility,    max: 30, label: labelScore(accessibility, 30) },
-      tonalBalance:      { score: tonalBalance,      max: 20, label: labelScore(tonalBalance, 20) },
-      functionalVariety: { score: functionalVariety, max: 20, label: labelScore(functionalVariety, 20) },
-      cohesion:          { score: cohesion,          max: 15, label: labelScore(cohesion, 15) },
-      neutralSupport:    { score: neutralSupport,    max: 15, label: labelScore(neutralSupport, 15) },
+      accessibility: { score: accessibility, max: 35, label: labelScore(accessibility, 35) },
+      harmony:       { score: harmony,       max: 30, label: labelScore(harmony, 30) },
+      versatility:   { score: versatility,   max: 20, label: labelScore(versatility, 20) },
+      balance:       { score: balance,       max: 15, label: labelScore(balance, 15) },
     },
   };
 }
@@ -950,24 +995,86 @@ app.post('/api/analyze', (req, res) => {
         if (i === j) continue;
         const ratio = Math.round(chroma.contrast(valid[i], valid[j]) * 100) / 100;
         const normalAA = ratio >= 4.5;
-        const rawFix = !normalAA ? findAccessibleForeground(valid[i], valid[j], 4.5) : null;
-        const quickFix = rawFix ? { ...rawFix, label: makeFixLabel(valid[i], rawFix.hex) } : null;
+        const fgRole = inferRole(colorData[i].h, colorData[i].s, colorData[i].l);
+        const bgRole = inferRole(colorData[j].h, colorData[j].s, colorData[j].l);
+        const { weight, importance } = getPairWeight(fgRole, bgRole);
+        let fixVariants = null;
+        if (!normalAA) {
+          const balanced = findAccessibleForeground(valid[i], valid[j], 4.5);
+          const accessibilityFirst = findAccessibleForeground(valid[i], valid[j], 4.5, true);
+          const aestheticsFirst = findAccessibleForeground(valid[i], valid[j], 3.0);
+          fixVariants = {
+            balanced:           balanced           ? { ...balanced,           label: makeFixLabel(valid[i], balanced.hex) }           : null,
+            accessibilityFirst: accessibilityFirst ? { ...accessibilityFirst, label: makeFixLabel(valid[i], accessibilityFirst.hex) } : null,
+            aestheticsFirst:    aestheticsFirst    ? { ...aestheticsFirst,    label: makeFixLabel(valid[i], aestheticsFirst.hex) }    : null,
+          };
+        }
         const why = !normalAA ? explainContrastFailure(valid[i], valid[j]) : null;
         pairs.push({
           foreground: valid[i].toUpperCase(), background: valid[j].toUpperCase(),
           ratio, normalAA, normalAAA: ratio >= 7, largeAA: ratio >= 3, largeAAA: ratio >= 4.5,
-          quickFix, why,
+          weight, importance, fixVariants, why,
         });
       }
     }
     pairs.sort((a, b) => b.ratio - a.ratio);
   }
 
+  // Functional coverage: how well critical and UI pairings perform
+  const criticalPairs = pairs.filter(p => p.weight >= 0.8);
+  const uiPairs = pairs.filter(p => p.weight >= 0.3);
+  const functionalCoverage = {
+    critical: criticalPairs.length > 0
+      ? Math.round(criticalPairs.filter(p => p.normalAA).length / criticalPairs.length * 100)
+      : null,
+    ui: uiPairs.length > 0
+      ? Math.round(uiPairs.filter(p => p.normalAA).length / uiPairs.length * 100)
+      : null,
+    decorativeCount: pairs.filter(p => p.weight < 0.1).length,
+  };
+
   const issues = analyzeIssues(colorData, meanHue, avgS);
   const health = computeHealth(colorData, pairs, issues);
+
+  // Add tradeoff note to each issue fix
+  for (const issue of issues) {
+    if (!issue.fix?.hex) continue;
+    try {
+      const modData = colorData.map(c => {
+        if (issue.targetHex && c.hex === issue.targetHex.toUpperCase()) {
+          const [h, s, l] = chroma(issue.fix.hex).hsl();
+          return { hex: issue.fix.hex.toUpperCase(), h: isNaN(h) || h == null ? 0 : h, s, l };
+        }
+        return c;
+      });
+      if (!issue.targetHex) {
+        const [h, s, l] = chroma(issue.fix.hex).hsl();
+        modData.push({ hex: issue.fix.hex.toUpperCase(), h: isNaN(h) || h == null ? 0 : h, s, l });
+      }
+      const modPairs = [];
+      for (let i = 0; i < modData.length; i++) {
+        for (let j = 0; j < modData.length; j++) {
+          if (i === j) continue;
+          const r = chroma.contrast(modData[i].hex, modData[j].hex);
+          const fR = inferRole(modData[i].h, modData[i].s, modData[i].l);
+          const bR = inferRole(modData[j].h, modData[j].s, modData[j].l);
+          const { weight: w } = getPairWeight(fR, bR);
+          modPairs.push({ normalAA: r >= 4.5, weight: w });
+        }
+      }
+      const modHealth = computeHealth(modData, modPairs, []);
+      const deltaA = modHealth.breakdown.accessibility.score - health.breakdown.accessibility.score;
+      const deltaH = modHealth.breakdown.harmony.score - health.breakdown.harmony.score;
+      const parts = [];
+      if (Math.abs(deltaA) >= 3) parts.push(`${deltaA > 0 ? '+' : ''}${Math.round(deltaA)} accessibility`);
+      if (Math.abs(deltaH) >= 3) parts.push(`${deltaH > 0 ? '+' : ''}${Math.round(deltaH)} harmony`);
+      if (parts.length > 0) issue.fix.tradeoff = { note: parts.join(' · ') };
+    } catch { /* skip tradeoff on error */ }
+  }
+
   const functionalPairs = valid.length >= 2 ? getFunctionalPairs(pairs, colorData) : null;
 
-  res.json({ health, issues, pairs, functionalPairs });
+  res.json({ health, issues, pairs, functionalPairs, functionalCoverage });
 });
 
 // ── POST /api/accessibility ───────────────────────────────────────────────────

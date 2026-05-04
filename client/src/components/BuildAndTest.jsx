@@ -3,18 +3,18 @@ import ColorPicker from './ColorPicker.jsx';
 import ColorSwatch from './ColorSwatch.jsx';
 
 const FILTERS = [
-  { id: 'fail', label: 'Fails' },
-  { id: 'all',  label: 'All' },
-  { id: 'aaa',  label: 'AAA' },
-  { id: 'aa',   label: 'AA' },
+  { id: 'fail',       label: 'Fails' },
+  { id: 'all',        label: 'All' },
+  { id: 'aaa',        label: 'AAA' },
+  { id: 'aa',         label: 'AA' },
+  { id: 'decorative', label: 'Decorative' },
 ];
 
 const HEALTH_CATEGORIES = [
-  { key: 'accessibility',     label: 'Accessibility',     max: 30 },
-  { key: 'tonalBalance',      label: 'Tonal Balance',     max: 20 },
-  { key: 'functionalVariety', label: 'Functional Variety',max: 20 },
-  { key: 'cohesion',          label: 'Cohesion',          max: 15 },
-  { key: 'neutralSupport',    label: 'Neutral Support',   max: 15 },
+  { key: 'accessibility', label: 'Accessibility', max: 35 },
+  { key: 'harmony',       label: 'Harmony',       max: 30 },
+  { key: 'versatility',   label: 'Versatility',   max: 20 },
+  { key: 'balance',       label: 'Balance',       max: 15 },
 ];
 
 const SEVERITY_ICON  = { error: '✕', warning: '⚠', info: '→' };
@@ -98,22 +98,25 @@ export default function BuildAndTest({ palette, addColor, addColors, removeColor
 
   const importPreview = parseHexes(importText);
 
-  const pairs   = analysis?.pairs ?? [];
-  const issues  = analysis?.issues ?? [];
-  const health  = analysis?.health ?? null;
-  const funcPairs = analysis?.functionalPairs ?? null;
+  const pairs            = analysis?.pairs ?? [];
+  const issues           = analysis?.issues ?? [];
+  const health           = analysis?.health ?? null;
+  const funcPairs        = analysis?.functionalPairs ?? null;
+  const funcCoverage     = analysis?.functionalCoverage ?? null;
 
   const stats = {
-    total: pairs.length,
-    aaa:   pairs.filter(p => p.normalAAA).length,
-    aa:    pairs.filter(p => p.normalAA).length,
-    fail:  pairs.filter(p => !p.normalAA && !p.largeAA).length,
+    total:      pairs.length,
+    aaa:        pairs.filter(p => p.normalAAA).length,
+    aa:         pairs.filter(p => p.normalAA).length,
+    fail:       pairs.filter(p => !p.normalAA && !p.largeAA).length,
+    decorative: pairs.filter(p => p.importance === 'decorative').length,
   };
 
   const filtered = pairs.filter(p => {
-    if (filter === 'aaa')  return p.normalAAA;
-    if (filter === 'aa')   return p.normalAA;
-    if (filter === 'fail') return !p.normalAA && !p.largeAA;
+    if (filter === 'aaa')        return p.normalAAA;
+    if (filter === 'aa')         return p.normalAA;
+    if (filter === 'fail')       return !p.normalAA && !p.largeAA;
+    if (filter === 'decorative') return p.importance === 'decorative';
     return true;
   });
 
@@ -260,7 +263,7 @@ export default function BuildAndTest({ palette, addColor, addColors, removeColor
                         </div>
                         <div className="intel-score-tagline">
                           {health.overall >= 80 ? 'Great palette — looking good!' :
-                           health.overall >= 55 ? 'Some issues to address below' :
+                           health.overall >= 60 ? 'Some areas to improve below' :
                            'Needs work — check issues below'}
                         </div>
                       </div>
@@ -282,7 +285,7 @@ export default function BuildAndTest({ palette, addColor, addColors, removeColor
                               />
                             </div>
                             <span className="intel-breakdown-score">{d.score}<span>/{cat.max}</span></span>
-                            <span className={`intel-breakdown-tag ${d.label === 'Excellent' ? 'tag-excellent' : d.label === 'Good' ? 'tag-good' : d.label === 'Fair' ? 'tag-fair' : 'tag-needswork'}`}>
+                            <span className={`intel-breakdown-tag ${d.label === 'Exceptional' || d.label === 'Excellent' ? 'tag-excellent' : d.label === 'Strong' || d.label === 'Good' ? 'tag-good' : 'tag-needswork'}`}>
                               {d.label}
                             </span>
                           </div>
@@ -345,6 +348,33 @@ export default function BuildAndTest({ palette, addColor, addColors, removeColor
                 </div>
               )}
 
+              {/* ── Functional Coverage ────────────────────── */}
+              {funcCoverage && palette.length >= 2 && (funcCoverage.critical !== null || funcCoverage.ui !== null) && (
+                <div className="intel-section">
+                  <div className="intel-section-title">Your palette supports</div>
+                  <div className="coverage-summary">
+                    {funcCoverage.critical !== null && (
+                      <div className={`coverage-row ${funcCoverage.critical === 100 ? 'coverage-pass' : funcCoverage.critical >= 60 ? 'coverage-warn' : 'coverage-fail'}`}>
+                        <span className="coverage-icon">{funcCoverage.critical === 100 ? '✓' : funcCoverage.critical >= 60 ? '~' : '✗'}</span>
+                        <span>{funcCoverage.critical}% readable body text</span>
+                      </div>
+                    )}
+                    {funcCoverage.ui !== null && (
+                      <div className={`coverage-row ${funcCoverage.ui >= 80 ? 'coverage-pass' : funcCoverage.ui >= 50 ? 'coverage-warn' : 'coverage-fail'}`}>
+                        <span className="coverage-icon">{funcCoverage.ui >= 80 ? '✓' : funcCoverage.ui >= 50 ? '~' : '✗'}</span>
+                        <span>{funcCoverage.ui}% UI-safe combinations</span>
+                      </div>
+                    )}
+                    {funcCoverage.decorativeCount > 0 && (
+                      <div className="coverage-row coverage-neutral">
+                        <span className="coverage-icon">◌</span>
+                        <span>{funcCoverage.decorativeCount} decorative pair{funcCoverage.decorativeCount !== 1 ? 's' : ''} — not required to pass WCAG</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* ── Contrast Pairs ─────────────────────────── */}
               {palette.length >= 2 && (
                 <div className="intel-contrast-section">
@@ -372,7 +402,7 @@ export default function BuildAndTest({ palette, addColor, addColors, removeColor
                       >
                         {f.label}
                         <span style={{ marginLeft: '0.3rem', opacity: 0.7 }}>
-                          ({f.id === 'all' ? stats.total : f.id === 'aaa' ? stats.aaa : f.id === 'aa' ? stats.aa : stats.fail})
+                          ({f.id === 'all' ? stats.total : f.id === 'aaa' ? stats.aaa : f.id === 'aa' ? stats.aa : f.id === 'decorative' ? stats.decorative : stats.fail})
                         </span>
                       </button>
                     ))}
@@ -541,6 +571,9 @@ function IssueCard({ issue, palette, addColor, updateColor }) {
           <span className="issue-fix-hex">{issue.fix.hex}</span>
           <span className="issue-fix-name">{issue.fix.name}</span>
           <span className="issue-fix-impact">{issue.fix.impact}</span>
+          {issue.fix.tradeoff?.note && (
+            <span className="fix-tradeoff">{issue.fix.tradeoff.note}</span>
+          )}
         </div>
         <div className="issue-fix-action">
           {applied ? (
@@ -600,15 +633,18 @@ function FuncPairCard({ label, pair, palette, isCTA }) {
 
 // ── Full pair card ────────────────────────────────────────────────────────────
 
+const IMPORTANCE_LABEL = { critical: 'Critical', important: 'Important', standard: 'Standard', low: 'Low', decorative: 'Decorative' };
+
 function PairCard({ pair, palette, addColor, updateColor }) {
   const fgColor     = palette.find(c => c.hex === pair.foreground);
   const fgName      = fgColor?.name ?? pair.foreground;
   const bgName      = palette.find(c => c.hex === pair.background)?.name ?? pair.background;
   const borderClass = pair.normalAAA ? 'border-pass' : pair.largeAA ? 'border-warn' : 'border-fail';
   const fgLocked    = fgColor?.locked ?? false;
+  const isDecorative = pair.importance === 'decorative';
 
   return (
-    <div className={`pair-card ${borderClass}`}>
+    <div className={`pair-card ${borderClass}${isDecorative ? ' pair-card-decorative' : ''}`}>
       <div className="pair-preview" style={{ backgroundColor: pair.background }}>
         <div className="pair-preview-lg" style={{ color: pair.foreground }}>Large Text Aa</div>
         <div className="pair-preview-sm" style={{ color: pair.foreground }}>Normal body text at 14px</div>
@@ -619,6 +655,11 @@ function PairCard({ pair, palette, addColor, updateColor }) {
         <span className="pair-swatch-sep">on</span>
         <div className="pair-swatch-dot" style={{ background: pair.background }} title={`Background: ${pair.background}`} />
         <span className="pair-hex" style={{ marginLeft: 'auto' }}>{fgName} / {bgName}</span>
+        {pair.importance && (
+          <span className={`pair-importance-badge pair-importance-${pair.importance}`}>
+            {IMPORTANCE_LABEL[pair.importance] ?? pair.importance}
+          </span>
+        )}
       </div>
 
       <div className="pair-details">
@@ -631,11 +672,15 @@ function PairCard({ pair, palette, addColor, updateColor }) {
         </div>
       </div>
 
+      {isDecorative && !pair.normalAA && (
+        <div className="pair-decorative-note">Decorative pair — not required to pass WCAG for typical use</div>
+      )}
+
       {!pair.normalAA && pair.why && (
         <div className="pair-why">{pair.why}</div>
       )}
 
-      {!pair.normalAA && pair.quickFix && (
+      {!pair.normalAA && pair.fixVariants && (
         <QuickFixPanel
           pair={pair}
           fgColor={fgColor}
@@ -649,23 +694,50 @@ function PairCard({ pair, palette, addColor, updateColor }) {
   );
 }
 
+const VARIANT_LABELS = {
+  balanced:           { label: 'Balanced',    desc: 'Minimum change, preserves hue & saturation' },
+  accessibilityFirst: { label: 'A11y First',  desc: 'Hits 4.5:1 at any cost — may desaturate slightly' },
+  aestheticsFirst:    { label: 'Aesthetics',  desc: 'Targets 3:1 (large text) — minimal color change' },
+};
+
 function QuickFixPanel({ pair, fgColor, fgLocked, palette, addColor, updateColor }) {
-  const [accepted, setAccepted] = useState(false);
-  const alreadyIn = palette.some(c => c.hex.toUpperCase() === pair.quickFix.hex.toUpperCase());
+  const [accepted, setAccepted]           = useState(false);
+  const [activeVariant, setActiveVariant] = useState('balanced');
+
+  const variant = pair.fixVariants?.[activeVariant];
+  const alreadyIn = variant ? palette.some(c => c.hex.toUpperCase() === variant.hex.toUpperCase()) : false;
 
   function handleAccept() {
-    if (fgColor && updateColor) updateColor(fgColor.id, pair.quickFix.hex);
-    else if (addColor) addColor(pair.quickFix.hex);
+    if (!variant) return;
+    if (fgColor && updateColor) updateColor(fgColor.id, variant.hex);
+    else if (addColor) addColor(variant.hex);
     setAccepted(true);
   }
 
   return (
     <div className={`qfix-panel ${accepted ? 'qfix-accepted' : ''}`}>
+      {!accepted && (
+        <div className="qfix-variant-tabs">
+          {Object.entries(VARIANT_LABELS).map(([key, { label }]) => (
+            pair.fixVariants?.[key] && (
+              <button
+                key={key}
+                className={`qfix-variant-tab ${activeVariant === key ? 'active' : ''}`}
+                onClick={() => setActiveVariant(key)}
+                title={VARIANT_LABELS[key].desc}
+              >
+                {label}
+              </button>
+            )
+          ))}
+        </div>
+      )}
+
       <div className="qfix-label">
-        {accepted ? '✓ Fix applied' : pair.quickFix.label ?? 'Use this accessible color instead'}
+        {accepted ? '✓ Fix applied' : variant?.label ?? 'Use this accessible color instead'}
       </div>
 
-      {!accepted && (
+      {!accepted && variant && (
         <div className="qfix-compare">
           <div className="qfix-side">
             <div className="qfix-side-tag">Before</div>
@@ -678,13 +750,13 @@ function QuickFixPanel({ pair, fgColor, fgLocked, palette, addColor, updateColor
           <div className="qfix-side">
             <div className="qfix-side-tag">After</div>
             <div className="qfix-preview" style={{ background: pair.background }}>
-              <span style={{ color: pair.quickFix.hex }}>Aa</span>
+              <span style={{ color: variant.hex }}>Aa</span>
             </div>
-            <span className="qfix-ratio qfix-ratio-pass">{pair.quickFix.ratio}:1 ✓</span>
+            <span className="qfix-ratio qfix-ratio-pass">{variant.ratio}:1 ✓</span>
           </div>
           <div className="qfix-color-info">
-            <div style={{ width: 20, height: 20, borderRadius: 4, background: pair.quickFix.hex, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.12)', flexShrink: 0 }} />
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-2)', fontWeight: 600 }}>{pair.quickFix.hex}</span>
+            <div style={{ width: 20, height: 20, borderRadius: 4, background: variant.hex, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.12)', flexShrink: 0 }} />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-2)', fontWeight: 600 }}>{variant.hex}</span>
           </div>
         </div>
       )}
@@ -697,7 +769,7 @@ function QuickFixPanel({ pair, fgColor, fgLocked, palette, addColor, updateColor
         ) : alreadyIn ? (
           <span className="badge badge-pass" style={{ fontSize: '0.75rem', padding: '0.3rem 0.75rem' }}>✓ Already in palette</span>
         ) : (
-          <button className="btn btn-primary btn-sm qfix-btn" onClick={handleAccept}>
+          <button className="btn btn-primary btn-sm qfix-btn" onClick={handleAccept} disabled={!variant}>
             ✓ Accept Fix
           </button>
         )}

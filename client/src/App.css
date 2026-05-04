@@ -1815,3 +1815,99 @@ input  { font-family: inherit; }
   line-height: 1.5;
 }
 
+/* ── Pair importance badge ───────────────────────────────────────────────────── */
+.pair-importance-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--r-full);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.pair-importance-critical  { background: #fee2e2; color: #991b1b; }
+.pair-importance-important { background: #dbeafe; color: #1e40af; }
+.pair-importance-standard  { background: #e0e7ff; color: #3730a3; }
+.pair-importance-low       { background: var(--bg); color: var(--text-3); }
+.pair-importance-decorative { background: var(--surface-2); color: var(--text-4); }
+
+.pair-card-decorative { opacity: 0.75; }
+.pair-card-decorative .pair-preview { opacity: 0.85; }
+
+.pair-decorative-note {
+  padding: 0.4rem 1.125rem;
+  font-size: 0.75rem;
+  color: var(--text-4);
+  background: var(--surface-2);
+  font-style: italic;
+}
+
+/* ── Functional coverage summary ────────────────────────────────────────────── */
+.coverage-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.625rem 1.125rem 0.75rem;
+}
+.coverage-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+.coverage-icon {
+  font-size: 0.875rem;
+  font-weight: 700;
+  width: 1.1rem;
+  flex-shrink: 0;
+  text-align: center;
+}
+.coverage-pass  { color: var(--green-dk); }
+.coverage-warn  { color: var(--amber-dk); }
+.coverage-fail  { color: var(--red-dk); }
+.coverage-neutral { color: var(--text-3); }
+
+/* ── QuickFix 3-variant tab picker ──────────────────────────────────────────── */
+.qfix-variant-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.qfix-variant-tab {
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-3);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.qfix-variant-tab:hover { color: var(--text-1); }
+.qfix-variant-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ── Issue fix tradeoff note ────────────────────────────────────────────────── */
+.fix-tradeoff {
+  font-size: 0.7rem;
+  color: var(--text-4);
+  font-style: italic;
+  margin-top: 0.1rem;
+}
+
+/* ── HarmonizeColors accessibility-adjusted tag ─────────────────────────────── */
+.a11y-adjusted-tag {
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--r-full);
+  background: #dbeafe;
+  color: #1e40af;
+  white-space: nowrap;
+}

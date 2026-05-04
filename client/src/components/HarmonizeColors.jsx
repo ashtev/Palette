@@ -413,7 +413,12 @@ function IssueCard({ issue, palette, wasFixed, isLocked, onFix }) {
       <div className="issue-colors">
         <ColorSwatch hex={issue.color}      name={colorEntry?.name ?? 'Current'} size="md" locked={isLocked} />
         <span className="issue-arrow">→</span>
-        <ColorSwatch hex={issue.suggestion} name="Fixed"                          size="md" />
+        <div style={{ position: 'relative', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
+          <ColorSwatch hex={issue.suggestion} name="Fixed" size="md" />
+          {issue.accessibilityAdjusted && (
+            <span className="a11y-adjusted-tag">Adjusted for readability</span>
+          )}
+        </div>
       </div>
 
       <p className="issue-desc">{issue.description}</p>
