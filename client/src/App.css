@@ -1290,6 +1290,7 @@ input  { font-family: inherit; }
   align-items: start;
 }
 @media (max-width: 860px) { .build-test-columns { grid-template-columns: 1fr; } }
+.bt-palette-col { min-width: 0; }
 
 /* ── Contrast panel ─────────────────────────────────────────────────────────── */
 .contrast-panel {
@@ -1417,7 +1418,6 @@ input  { font-family: inherit; }
   padding: 0.875rem 1.125rem;
   background: var(--green-bg);
   border-top: 1px solid #bbf7d0;
-  border-bottom: 1px solid #bbf7d0;
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--green-dk);
@@ -1425,7 +1425,6 @@ input  { font-family: inherit; }
 
 /* Health score */
 .intel-health {
-  border-bottom: 1px solid var(--border);
 }
 
 .intel-health-header {
@@ -1498,8 +1497,9 @@ input  { font-family: inherit; }
   font-size: 0.7rem;
   color: var(--text-3);
   font-weight: 500;
-  min-width: 110px;
+  min-width: 120px;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .intel-breakdown-bar-wrap {
@@ -1808,11 +1808,10 @@ input  { font-family: inherit; }
 
 /* Why this fails — shown on failing pair cards */
 .pair-why {
-  padding: 0.5rem 1.125rem 0;
+  padding: 0.5rem 1.125rem;
   font-size: 0.775rem;
   color: var(--amber-dk);
   background: var(--amber-bg);
-  border-top: 1px solid #fde68a;
   line-height: 1.5;
 }
 
