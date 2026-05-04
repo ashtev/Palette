@@ -1388,3 +1388,431 @@ input  { font-family: inherit; }
 .contrast-empty-icon { font-size: 2rem; color: var(--text-4); }
 .contrast-empty-large p { font-size: 0.875rem; color: var(--text-3); }
 
+/* ── Palette Intelligence panel ─────────────────────────────────────────────── */
+.intel-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.intel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 3rem 1.5rem;
+  text-align: center;
+}
+.intel-empty-icon { font-size: 2rem; color: var(--text-4); }
+.intel-empty p { font-size: 0.875rem; color: var(--text-3); }
+
+.intel-all-good {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.875rem 1.125rem;
+  background: var(--green-bg);
+  border-top: 1px solid #bbf7d0;
+  border-bottom: 1px solid #bbf7d0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--green-dk);
+}
+
+/* Health score */
+.intel-health {
+  border-bottom: 1px solid var(--border);
+}
+
+.intel-health-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.125rem 0.625rem;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.intel-panel-title {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-1);
+  flex: 1;
+}
+
+.intel-health-body {
+  padding: 1rem 1.125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.intel-score-row {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+}
+
+.intel-score-num {
+  font-size: 3.25rem;
+  font-weight: 900;
+  line-height: 1;
+  flex-shrink: 0;
+  letter-spacing: -0.03em;
+}
+
+.intel-score-right {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.intel-score-label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+.intel-score-tagline {
+  font-size: 0.775rem;
+  color: var(--text-3);
+}
+
+.intel-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.intel-breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.intel-breakdown-label {
+  font-size: 0.7rem;
+  color: var(--text-3);
+  font-weight: 500;
+  min-width: 110px;
+  flex-shrink: 0;
+}
+
+.intel-breakdown-bar-wrap {
+  flex: 1;
+  height: 5px;
+  background: var(--bg);
+  border-radius: var(--r-full);
+  overflow: hidden;
+}
+
+.intel-breakdown-bar {
+  height: 100%;
+  border-radius: var(--r-full);
+  transition: width 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  min-width: 2px;
+}
+
+.intel-breakdown-score {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  min-width: 32px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.intel-breakdown-score span { color: var(--text-4); font-weight: 400; }
+
+.intel-breakdown-tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.375rem;
+  border-radius: var(--r-full);
+  min-width: 68px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.tag-excellent { background: var(--green-bg); color: var(--green-dk); }
+.tag-good      { background: #dbeafe; color: #1d4ed8; }
+.tag-fair      { background: var(--amber-bg); color: var(--amber-dk); }
+.tag-needswork { background: var(--red-bg); color: var(--red-dk); }
+
+/* Section wrapper inside intel panel */
+.intel-section {
+  padding: 1rem 1.125rem;
+  border-top: 1px solid var(--border);
+}
+
+.intel-section-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.intel-issues-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Issue card */
+.issue-card-intel {
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--surface);
+}
+.issue-card-intel.issue-severity-error   { border-left: 3px solid var(--red);   }
+.issue-card-intel.issue-severity-warning { border-left: 3px solid var(--amber); }
+.issue-card-intel.issue-severity-info    { border-left: 3px solid var(--accent);}
+
+.issue-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.75rem 0.875rem 0.5rem;
+}
+
+.issue-severity-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.625rem;
+  font-weight: 900;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+.issue-card-intel.issue-severity-error   .issue-severity-dot { background: var(--red-bg);        color: var(--red-dk); }
+.issue-card-intel.issue-severity-warning .issue-severity-dot { background: var(--amber-bg);      color: var(--amber-dk); }
+.issue-card-intel.issue-severity-info    .issue-severity-dot { background: var(--accent-light);  color: var(--accent); }
+
+.issue-card-meta { display: flex; flex-direction: column; gap: 0.25rem; flex: 1; }
+.issue-card-title { font-size: 0.8125rem; font-weight: 700; color: var(--text-1); }
+.issue-card-explanation { font-size: 0.775rem; color: var(--text-3); line-height: 1.55; }
+
+.issue-fix-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.875rem 0.75rem;
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+}
+
+.issue-fix-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.12), var(--sh-1);
+}
+
+.issue-fix-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.issue-fix-hex  { font-family: var(--font-mono); font-size: 0.75rem; font-weight: 700; color: var(--text-1); }
+.issue-fix-name { font-size: 0.7rem; color: var(--text-3); }
+.issue-fix-impact { font-size: 0.7rem; color: var(--accent); font-style: italic; }
+
+.issue-fix-action { flex-shrink: 0; }
+
+/* Functional pairs */
+.intel-func-pairs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.625rem;
+}
+@media (max-width: 520px) { .intel-func-pairs { grid-template-columns: 1fr; } }
+
+.func-pair-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.func-pair-label {
+  padding: 0.375rem 0.625rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.func-pair-preview {
+  padding: 0.75rem 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+}
+
+.func-pair-text-mock {
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+.func-pair-btn-mock {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.func-pair-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.4rem 0.625rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  flex-wrap: wrap;
+}
+
+.func-pair-swatches { display: flex; align-items: center; gap: 0.3rem; }
+.func-pair-ratio {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-2);
+  margin-left: auto;
+}
+
+/* Contrast section inside intel panel */
+.intel-contrast-section {
+  border-top: 1px solid var(--border);
+}
+
+.intel-contrast-header {
+  padding: 0.875rem 1.125rem 0;
+}
+
+/* ── Smart Suggestions section wrapper ──────────────────────────────────────── */
+.smart-suggestions-section { display: flex; flex-direction: column; gap: 1rem; }
+
+/* ── Suggestion card (replaces scheme-card for palette mode) ─────────────────── */
+.suggestion-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--card-accent, var(--accent));
+  border-radius: var(--r-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: box-shadow var(--ease);
+}
+.suggestion-card:hover { box-shadow: var(--sh-3); }
+
+.suggestion-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.875rem;
+  padding: 1rem 1.125rem 0.875rem;
+}
+
+.suggestion-card-titles { display: flex; flex-direction: column; gap: 0.3rem; flex: 1; min-width: 0; }
+
+.suggestion-card-name {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-1);
+  line-height: 1.3;
+}
+
+.suggestion-card-reason {
+  font-size: 0.775rem;
+  color: var(--text-3);
+  line-height: 1.55;
+}
+
+.suggestion-card-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0 1.125rem 1rem;
+}
+
+.suggestion-swatch-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  cursor: pointer;
+  position: relative;
+}
+.suggestion-swatch-wrap.in-palette { cursor: default; opacity: 0.55; }
+.suggestion-swatch-wrap:not(.in-palette):hover .suggestion-swatch {
+  transform: translateY(-3px);
+  box-shadow: var(--sh-3), inset 0 0 0 1px rgba(0,0,0,0.1);
+}
+
+.suggestion-swatch {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-2), inset 0 0 0 1px rgba(0,0,0,0.09);
+  transition: transform var(--ease), box-shadow var(--ease);
+  flex-shrink: 0;
+}
+
+.suggestion-swatch-check {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--green);
+  border: 2px solid var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 7px;
+  color: white;
+  font-weight: 900;
+  pointer-events: none;
+}
+
+.suggestion-swatch-hex {
+  font-size: 0.6rem;
+  font-family: var(--font-mono);
+  color: var(--text-4);
+  letter-spacing: -0.02em;
+}
+
+/* Why this fails — shown on failing pair cards */
+.pair-why {
+  padding: 0.5rem 1.125rem 0;
+  font-size: 0.775rem;
+  color: var(--amber-dk);
+  background: var(--amber-bg);
+  border-top: 1px solid #fde68a;
+  line-height: 1.5;
+}
+

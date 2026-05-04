@@ -9,42 +9,64 @@ const FILTERS = [
   { id: 'aa',   label: 'AA' },
 ];
 
+const HEALTH_CATEGORIES = [
+  { key: 'accessibility',     label: 'Accessibility',     max: 30 },
+  { key: 'tonalBalance',      label: 'Tonal Balance',     max: 20 },
+  { key: 'functionalVariety', label: 'Functional Variety',max: 20 },
+  { key: 'cohesion',          label: 'Cohesion',          max: 15 },
+  { key: 'neutralSupport',    label: 'Neutral Support',   max: 15 },
+];
+
+const SEVERITY_ICON  = { error: '✕', warning: '⚠', info: '→' };
+const SEVERITY_CLASS = { error: 'issue-severity-error', warning: 'issue-severity-warning', info: 'issue-severity-info' };
+
 function parseHexes(raw) {
   return (raw.match(/#[0-9A-Fa-f]{6}/gi) ?? []).map(h => h.toUpperCase());
 }
 
+function healthColor(score) {
+  if (score >= 80) return 'var(--green-dk)';
+  if (score >= 55) return 'var(--amber-dk)';
+  return 'var(--red-dk)';
+}
+
+function healthBarColor(score, max) {
+  const p = score / max;
+  if (p >= 0.75) return 'var(--green)';
+  if (p >= 0.45) return 'var(--amber)';
+  return 'var(--red)';
+}
+
 export default function BuildAndTest({ palette, addColor, addColors, removeColor, updateColor, toggleLock }) {
-  const [pickerColor, setPickerColor]   = useState('#3B82F6');
-  const [suggestions, setSuggestions]   = useState(null);
+  const [pickerColor, setPickerColor]     = useState('#3B82F6');
+  const [suggestions, setSuggestions]     = useState(null);
   const [suggestLoading, setSuggestLoading] = useState(false);
-  const [variant, setVariant]           = useState(0);
-  const [suggestBase, setSuggestBase]   = useState(null);
-  const [importOpen, setImportOpen]     = useState(false);
-  const [importText, setImportText]     = useState('');
+  const [variant, setVariant]             = useState(0);
+  const [suggestBase, setSuggestBase]     = useState(null);
+  const [importOpen, setImportOpen]       = useState(false);
+  const [importText, setImportText]       = useState('');
 
-  const [pairs, setPairs]         = useState([]);
-  const [testLoading, setTestLoading] = useState(false);
-  const [filter, setFilter]       = useState('fail');
-  const [testError, setTestError] = useState(null);
+  const [analysis, setAnalysis]           = useState(null);
+  const [analyzeLoading, setAnalyzeLoading] = useState(false);
+  const [filter, setFilter]               = useState('fail');
 
-  async function runTest() {
-    if (palette.length < 2) { setPairs([]); return; }
-    setTestLoading(true);
-    setTestError(null);
+  async function runAnalysis() {
+    if (palette.length < 1) { setAnalysis(null); return; }
+    setAnalyzeLoading(true);
     try {
-      const res = await fetch('/api/accessibility', {
+      const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ colors: palette.map(c => c.hex) }),
       });
       if (!res.ok) throw new Error(await res.text());
-      setPairs((await res.json()).pairs);
-    } catch (e) { setTestError(e.message); }
-    finally { setTestLoading(false); }
+      setAnalysis(await res.json());
+    } catch (e) { console.error(e); }
+    finally { setAnalyzeLoading(false); }
   }
 
   useEffect(() => {
-    runTest();
+    runAnalysis();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [palette.map(c => c.hex).join(',')]);
 
@@ -76,6 +98,11 @@ export default function BuildAndTest({ palette, addColor, addColors, removeColor
 
   const importPreview = parseHexes(importText);
 
+  const pairs   = analysis?.pairs ?? [];
+  const issues  = analysis?.issues ?? [];
+  const health  = analysis?.health ?? null;
+  const funcPairs = analysis?.functionalPairs ?? null;
+
   const stats = {
     total: pairs.length,
     aaa:   pairs.filter(p => p.normalAAA).length,
@@ -96,7 +123,7 @@ export default function BuildAndTest({ palette, addColor, addColors, removeColor
         <div>
           <h2 className="section-title">Build &amp; Test Your Palette</h2>
           <p className="section-desc">
-            Add colors and watch contrast scores update live. Smart Suggestions™ analyzes your whole palette and surfaces the most accessible completions first.
+            Add colors and watch the intelligence panel update live — it detects issues, explains failures, and shows one-click fixes.
           </p>
         </div>
       </div>
@@ -159,8 +186,9 @@ export default function BuildAndTest({ palette, addColor, addColors, removeColor
         </div>
       )}
 
-      {/* Two-column: palette (left) + live contrast (right) */}
+      {/* Two-column: palette (left) + intelligence panel (right) */}
       <div className="build-test-columns">
+
         {/* Left: palette grid */}
         <div className="bt-palette-col">
           {palette.length === 0 ? (
@@ -203,180 +231,374 @@ export default function BuildAndTest({ palette, addColor, addColors, removeColor
           )}
         </div>
 
-        {/* Right: live contrast panel */}
-        <div className="contrast-panel">
-          <div className="contrast-panel-header">
-            <div className="contrast-panel-title-row">
-              <span className="contrast-panel-title">Live Contrast</span>
-              {testLoading && <span className="spinner" style={{ width: 13, height: 13, borderWidth: 1.5 }} />}
-              {!testLoading && pairs.length > 0 && (
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={runTest}
-                  style={{ padding: '0.15rem 0.45rem', fontSize: '0.75rem', marginLeft: 'auto' }}
-                >↺</button>
-              )}
+        {/* Right: Palette Intelligence */}
+        <div className="intel-panel">
+
+          {/* ── Health Score ────────────────────────────────── */}
+          {palette.length === 0 ? (
+            <div className="intel-empty">
+              <span className="intel-empty-icon">◎</span>
+              <p>Add colors to see palette analysis</p>
             </div>
-            {palette.length < 2 ? (
-              <p className="contrast-panel-hint">Add at least 2 colors to see results.</p>
-            ) : !testLoading && pairs.length > 0 ? (
-              <div className="contrast-stats-row">
-                <span className="contrast-stat contrast-stat-neutral">{stats.total} pairs</span>
-                {stats.aaa  > 0 && <span className="contrast-stat contrast-stat-pass">✓ {stats.aaa} AAA</span>}
-                {stats.aa   > 0 && <span className="contrast-stat contrast-stat-pass">✓ {stats.aa} AA</span>}
-                {stats.fail > 0
-                  ? <span className="contrast-stat contrast-stat-fail">✗ {stats.fail} Fail</span>
-                  : <span className="contrast-stat contrast-stat-pass">✓ All pass</span>
-                }
-              </div>
-            ) : null}
-          </div>
-
-          {palette.length >= 2 && !testLoading && pairs.length > 0 && (
+          ) : (
             <>
-              <div className="contrast-filter-bar">
-                {FILTERS.map(f => (
-                  <button
-                    key={f.id}
-                    className={`filter-btn ${filter === f.id ? 'active' : ''}`}
-                    onClick={() => setFilter(f.id)}
-                    style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
-                  >
-                    {f.label}
-                    <span style={{ marginLeft: '0.3rem', opacity: 0.7 }}>
-                      ({f.id === 'all' ? stats.total : f.id === 'aaa' ? stats.aaa : f.id === 'aa' ? stats.aa : stats.fail})
-                    </span>
-                  </button>
-                ))}
+              <div className="intel-health">
+                <div className="intel-health-header">
+                  <span className="intel-panel-title">Palette Intelligence</span>
+                  {analyzeLoading && <span className="spinner" style={{ width: 13, height: 13, borderWidth: 1.5 }} />}
+                </div>
+
+                {health && (
+                  <div className="intel-health-body">
+                    <div className="intel-score-row">
+                      <div className="intel-score-num" style={{ color: healthColor(health.overall) }}>
+                        {health.overall}
+                      </div>
+                      <div className="intel-score-right">
+                        <div className="intel-score-label">
+                          Health Score <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>/ 100</span>
+                        </div>
+                        <div className="intel-score-tagline">
+                          {health.overall >= 80 ? 'Great palette — looking good!' :
+                           health.overall >= 55 ? 'Some issues to address below' :
+                           'Needs work — check issues below'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="intel-breakdown">
+                      {HEALTH_CATEGORIES.map(cat => {
+                        const d = health.breakdown[cat.key];
+                        return (
+                          <div key={cat.key} className="intel-breakdown-row">
+                            <span className="intel-breakdown-label">{cat.label}</span>
+                            <div className="intel-breakdown-bar-wrap">
+                              <div
+                                className="intel-breakdown-bar"
+                                style={{
+                                  width: `${(d.score / cat.max) * 100}%`,
+                                  background: healthBarColor(d.score, cat.max),
+                                }}
+                              />
+                            </div>
+                            <span className="intel-breakdown-score">{d.score}<span>/{cat.max}</span></span>
+                            <span className={`intel-breakdown-tag ${d.label === 'Excellent' ? 'tag-excellent' : d.label === 'Good' ? 'tag-good' : d.label === 'Fair' ? 'tag-fair' : 'tag-needswork'}`}>
+                              {d.label}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {filter === 'fail' && stats.fail === 0 ? (
-                <div className="contrast-all-pass">
-                  <span style={{ fontSize: '1.1rem' }}>✓</span>
-                  <span>All pairs pass AA — great palette!</span>
+              {/* ── Issues ──────────────────────────────────── */}
+              {issues.length > 0 && (
+                <div className="intel-section">
+                  <div className="intel-section-title">
+                    Issues detected
+                    <span className="badge badge-fail" style={{ fontSize: '0.65rem' }}>{issues.length}</span>
+                  </div>
+                  <div className="intel-issues-list">
+                    {issues.map(issue => (
+                      <IssueCard
+                        key={issue.id}
+                        issue={issue}
+                        palette={palette}
+                        addColor={addColor}
+                        updateColor={updateColor}
+                      />
+                    ))}
+                  </div>
                 </div>
-              ) : filtered.length === 0 ? (
-                <div className="contrast-empty">No pairs match this filter</div>
-              ) : (
-                <div className="contrast-pairs-grid">
-                  {filtered.map((pair, i) => (
-                    <PairCard
-                      key={i}
-                      pair={pair}
-                      palette={palette}
-                      updateColor={updateColor}
-                      addColor={addColor}
-                    />
-                  ))}
+              )}
+
+              {issues.length === 0 && health && health.overall >= 75 && (
+                <div className="intel-all-good">
+                  <span>✓</span>
+                  <span>No major issues — your palette is in good shape!</span>
+                </div>
+              )}
+
+              {/* ── Functional Pairs ───────────────────────── */}
+              {funcPairs && (funcPairs.bestText || funcPairs.bestCTA) && (
+                <div className="intel-section">
+                  <div className="intel-section-title">Best combinations</div>
+                  <div className="intel-func-pairs">
+                    {funcPairs.bestText && (
+                      <FuncPairCard
+                        label="Best for text"
+                        pair={funcPairs.bestText}
+                        palette={palette}
+                      />
+                    )}
+                    {funcPairs.bestCTA && (
+                      <FuncPairCard
+                        label="Best CTA button"
+                        pair={funcPairs.bestCTA}
+                        palette={palette}
+                        isCTA
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Contrast Pairs ─────────────────────────── */}
+              {palette.length >= 2 && (
+                <div className="intel-contrast-section">
+                  <div className="intel-contrast-header">
+                    <div className="intel-section-title" style={{ marginBottom: 0 }}>
+                      Contrast pairs
+                    </div>
+                    <div className="contrast-stats-row" style={{ marginTop: '0.375rem' }}>
+                      <span className="contrast-stat contrast-stat-neutral">{stats.total} total</span>
+                      {stats.aaa  > 0 && <span className="contrast-stat contrast-stat-pass">✓ {stats.aaa} AAA</span>}
+                      {stats.aa   > 0 && <span className="contrast-stat contrast-stat-pass">✓ {stats.aa} AA</span>}
+                      {stats.fail > 0
+                        ? <span className="contrast-stat contrast-stat-fail">✗ {stats.fail} fail</span>
+                        : pairs.length > 0 && <span className="contrast-stat contrast-stat-pass">✓ All pass</span>}
+                    </div>
+                  </div>
+
+                  <div className="contrast-filter-bar">
+                    {FILTERS.map(f => (
+                      <button
+                        key={f.id}
+                        className={`filter-btn ${filter === f.id ? 'active' : ''}`}
+                        onClick={() => setFilter(f.id)}
+                        style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
+                      >
+                        {f.label}
+                        <span style={{ marginLeft: '0.3rem', opacity: 0.7 }}>
+                          ({f.id === 'all' ? stats.total : f.id === 'aaa' ? stats.aaa : f.id === 'aa' ? stats.aa : stats.fail})
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {filter === 'fail' && stats.fail === 0 ? (
+                    <div className="contrast-all-pass">
+                      <span style={{ fontSize: '1.1rem' }}>✓</span>
+                      <span>All pairs pass AA — great palette!</span>
+                    </div>
+                  ) : filtered.length === 0 ? (
+                    <div className="contrast-empty">No pairs match this filter</div>
+                  ) : (
+                    <div className="contrast-pairs-grid">
+                      {filtered.map((pair, i) => (
+                        <PairCard
+                          key={i}
+                          pair={pair}
+                          palette={palette}
+                          updateColor={updateColor}
+                          addColor={addColor}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </>
-          )}
-
-          {palette.length < 2 && (
-            <div className="contrast-empty-large">
-              <span className="contrast-empty-icon">◎</span>
-              <p>Add at least 2 colors to test contrast</p>
-            </div>
-          )}
-
-          {testError && (
-            <div style={{ padding: '0.875rem 1.125rem', fontSize: '0.8rem', color: 'var(--red-dk)' }}>
-              {testError}
-            </div>
           )}
         </div>
       </div>
 
       {/* Smart Suggestions — full width below */}
       {suggestions && (
-        <div>
+        <div className="smart-suggestions-section">
           <div className="section-header">
             <div>
               <h3 className="section-title" style={{ fontSize: '1rem' }}>Smart Palette Suggestions™</h3>
               <p className="section-desc">
-                {suggestBase?.startsWith('palette:') ? (
-                  <>
-                    Completing your{' '}
-                    <strong style={{ color: 'var(--text-1)', fontWeight: 600 }}>
-                      {suggestBase.split(':')[1]}-color palette
-                    </strong>
-                    {' '}· most accessible colors shown first
-                    {variant > 0 && <span style={{ color: 'var(--accent)', marginLeft: '0.35rem' }}>· Shuffle {variant}</span>}
-                  </>
-                ) : (
-                  <>
-                    Based on{' '}
-                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-1)' }}>
-                      {suggestBase}
-                    </span>
-                    {variant > 0 && <span style={{ color: 'var(--accent)', marginLeft: '0.35rem' }}>· Shuffle {variant}</span>}
-                  </>
+                {suggestions.headerMessage ?? (
+                  suggestBase?.startsWith('palette:')
+                    ? 'Analyzing your palette and surfacing what it needs most'
+                    : `Based on ${suggestBase}`
+                )}
+                {variant > 0 && (
+                  <span style={{ color: 'var(--accent)', marginLeft: '0.4rem' }}>· variation {variant}</span>
                 )}
               </p>
             </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => getSuggestions((variant + 1) % 5)} disabled={suggestLoading}>
-                ⟳ Shuffle
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => getSuggestions((variant + 1) % 5)}
+                disabled={suggestLoading}
+                title="Reshuffle within the same recommendations"
+              >
+                {suggestLoading ? <span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> : '⟳'}
+                {' '}Reshuffle
               </button>
               <button className="btn btn-ghost btn-sm" onClick={() => setSuggestions(null)}>Dismiss</button>
             </div>
           </div>
 
-          <div className="neutrals-section" style={{ marginBottom: '1rem' }}>
-            <div className="neutrals-section-header">
-              <div>
-                <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-1)' }}>Neutrals</span>
-                <span style={{ fontSize: '0.775rem', color: 'var(--text-3)', marginLeft: '0.5rem' }}>Tinted with your palette hue</span>
-              </div>
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={() => addColors([...suggestions.neutrals.lights.map(c => c.hex), ...suggestions.neutrals.darks.map(c => c.hex)])}
-              >Add All</button>
+          {/* Adaptive suggestions — palette mode */}
+          {suggestions.suggestions ? (
+            <div className="suggestions-grid">
+              {suggestions.suggestions.map(group => (
+                <SuggestionCard
+                  key={group.id}
+                  group={group}
+                  onAddAll={() => addColors(group.colors.map(c => c.hex))}
+                  onAddOne={hex => addColor(hex)}
+                  palette={palette}
+                />
+              ))}
             </div>
-            <div className="neutrals-row">
-              <span className="neutrals-row-label">Light</span>
-              <div className="neutrals-swatches">
-                {suggestions.neutrals.lights.map((c, i) => (
-                  <NeutralSwatch key={i} color={c} palette={palette} onAdd={() => addColor(c.hex)} />
+          ) : (
+            /* Single-color harmony mode */
+            <>
+              {suggestions.neutrals && (
+                <div className="neutrals-section" style={{ marginBottom: '1rem' }}>
+                  <div className="neutrals-section-header">
+                    <div>
+                      <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-1)' }}>Neutrals</span>
+                      <span style={{ fontSize: '0.775rem', color: 'var(--text-3)', marginLeft: '0.5rem' }}>Tinted with your hue</span>
+                    </div>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => addColors([...suggestions.neutrals.lights.map(c => c.hex), ...suggestions.neutrals.darks.map(c => c.hex)])}
+                    >Add All</button>
+                  </div>
+                  <div className="neutrals-row">
+                    <span className="neutrals-row-label">Light</span>
+                    <div className="neutrals-swatches">
+                      {suggestions.neutrals.lights.map((c, i) => (
+                        <NeutralSwatch key={i} color={c} palette={palette} onAdd={() => addColor(c.hex)} />
+                      ))}
+                    </div>
+                    <button className="btn btn-ghost btn-sm" onClick={() => addColors(suggestions.neutrals.lights.map(c => c.hex))}>Add row</button>
+                  </div>
+                  <div className="neutrals-row">
+                    <span className="neutrals-row-label">Dark</span>
+                    <div className="neutrals-swatches">
+                      {suggestions.neutrals.darks.map((c, i) => (
+                        <NeutralSwatch key={i} color={c} palette={palette} onAdd={() => addColor(c.hex)} />
+                      ))}
+                    </div>
+                    <button className="btn btn-ghost btn-sm" onClick={() => addColors(suggestions.neutrals.darks.map(c => c.hex))}>Add row</button>
+                  </div>
+                </div>
+              )}
+              <div className="suggestions-grid">
+                {suggestions.harmonies?.map(scheme => (
+                  <SuggestionCard
+                    key={scheme.id}
+                    group={{ ...scheme, reason: scheme.description }}
+                    onAddAll={() => addColors(scheme.colors.map(c => c.hex))}
+                    onAddOne={hex => addColor(hex)}
+                    palette={palette}
+                  />
                 ))}
               </div>
-              <button className="btn btn-ghost btn-sm" onClick={() => addColors(suggestions.neutrals.lights.map(c => c.hex))}>Add row</button>
-            </div>
-            <div className="neutrals-row">
-              <span className="neutrals-row-label">Dark</span>
-              <div className="neutrals-swatches">
-                {suggestions.neutrals.darks.map((c, i) => (
-                  <NeutralSwatch key={i} color={c} palette={palette} onAdd={() => addColor(c.hex)} />
-                ))}
-              </div>
-              <button className="btn btn-ghost btn-sm" onClick={() => addColors(suggestions.neutrals.darks.map(c => c.hex))}>Add row</button>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-2)' }}>
-              {suggestions.mode === 'palette' ? 'Completion Suggestions' : 'Harmony Colors'}
-            </span>
-          </div>
-          <div className="suggestions-grid">
-            {suggestions.harmonies.map(scheme => (
-              <SchemeCard
-                key={scheme.id}
-                scheme={scheme}
-                onAddAll={() => addColors(scheme.colors.map(c => c.hex))}
-                onAddOne={hex => addColor(hex)}
-                palette={palette}
-              />
-            ))}
-          </div>
+            </>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ── Full pair card (same fidelity as standalone Test tab) ────────────────────
+// ── Issue card ────────────────────────────────────────────────────────────────
+
+function IssueCard({ issue, palette, addColor, updateColor }) {
+  const [applied, setApplied] = useState(false);
+
+  const targetEntry = issue.targetHex ? palette.find(c => c.hex.toUpperCase() === issue.targetHex.toUpperCase()) : null;
+  const alreadyIn = palette.some(c => c.hex.toUpperCase() === issue.fix.hex.toUpperCase());
+
+  function applyFix() {
+    if (targetEntry && !targetEntry.locked && updateColor) {
+      updateColor(targetEntry.id, issue.fix.hex);
+    } else {
+      addColor(issue.fix.hex);
+    }
+    setApplied(true);
+  }
+
+  const isReplace = !!targetEntry && !targetEntry.locked;
+  const isLocked  = !!targetEntry && targetEntry.locked;
+
+  return (
+    <div className={`issue-card-intel ${SEVERITY_CLASS[issue.severity]}`}>
+      <div className="issue-card-top">
+        <span className={`issue-severity-dot ${SEVERITY_CLASS[issue.severity]}`}>
+          {SEVERITY_ICON[issue.severity]}
+        </span>
+        <div className="issue-card-meta">
+          <span className="issue-card-title">{issue.title}</span>
+          <p className="issue-card-explanation">{issue.explanation}</p>
+        </div>
+      </div>
+
+      <div className="issue-fix-row">
+        <div className="issue-fix-swatch" style={{ background: issue.fix.hex }} title={issue.fix.hex} />
+        <div className="issue-fix-info">
+          <span className="issue-fix-hex">{issue.fix.hex}</span>
+          <span className="issue-fix-name">{issue.fix.name}</span>
+          <span className="issue-fix-impact">{issue.fix.impact}</span>
+        </div>
+        <div className="issue-fix-action">
+          {applied ? (
+            <span className="badge badge-pass" style={{ fontSize: '0.7rem' }}>✓ Applied</span>
+          ) : alreadyIn ? (
+            <span className="badge badge-pass" style={{ fontSize: '0.7rem' }}>✓ In palette</span>
+          ) : isLocked ? (
+            <span className="badge badge-neutral" style={{ fontSize: '0.7rem' }}>🔒 Locked</span>
+          ) : (
+            <button className="btn btn-primary btn-sm" onClick={applyFix} style={{ fontSize: '0.75rem', padding: '0.3rem 0.7rem' }}>
+              {isReplace ? '↺ Replace' : '+ Add'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Functional pair card ──────────────────────────────────────────────────────
+
+function FuncPairCard({ label, pair, palette, isCTA }) {
+  const fgName = palette.find(c => c.hex === pair.foreground)?.name ?? pair.foreground;
+  const bgName = palette.find(c => c.hex === pair.background)?.name ?? pair.background;
+  return (
+    <div className="func-pair-card">
+      <div className="func-pair-label">{label}</div>
+      <div
+        className="func-pair-preview"
+        style={{ background: pair.background, color: pair.foreground }}
+      >
+        {isCTA ? (
+          <span
+            className="func-pair-btn-mock"
+            style={{ background: pair.foreground, color: pair.background }}
+          >{fgName}</span>
+        ) : (
+          <span className="func-pair-text-mock">Aa {fgName}</span>
+        )}
+      </div>
+      <div className="func-pair-meta">
+        <div className="func-pair-swatches">
+          <div className="pair-swatch-dot" style={{ background: pair.foreground }} />
+          <span className="pair-swatch-sep">on</span>
+          <div className="pair-swatch-dot" style={{ background: pair.background }} />
+        </div>
+        <span className="func-pair-ratio">{pair.ratio.toFixed(1)}:1</span>
+        <span className={`badge ${pair.normalAAA ? 'badge-pass' : pair.normalAA ? 'badge-pass' : 'badge-warn'}`}
+          style={{ fontSize: '0.65rem' }}
+        >
+          {pair.normalAAA ? 'AAA' : pair.normalAA ? 'AA' : 'Large AA'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── Full pair card ────────────────────────────────────────────────────────────
 
 function PairCard({ pair, palette, addColor, updateColor }) {
   const fgColor     = palette.find(c => c.hex === pair.foreground);
@@ -408,6 +630,10 @@ function PairCard({ pair, palette, addColor, updateColor }) {
           <span className={`badge ${pair.largeAAA  ? 'badge-pass' : 'badge-fail'}`}>Large AAA</span>
         </div>
       </div>
+
+      {!pair.normalAA && pair.why && (
+        <div className="pair-why">{pair.why}</div>
+      )}
 
       {!pair.normalAA && pair.quickFix && (
         <QuickFixPanel
@@ -494,32 +720,54 @@ function NeutralSwatch({ color, palette, onAdd }) {
   );
 }
 
-// ── Scheme card ───────────────────────────────────────────────────────────────
+// ── Suggestion card ───────────────────────────────────────────────────────────
 
-function SchemeCard({ scheme, onAddAll, onAddOne, palette }) {
+const INTENT_ACCENT = {
+  accessibility: '#dc2626',
+  depth:         '#1d4ed8',
+  space:         '#0891b2',
+  balance:       '#7c3aed',
+  grounding:     '#374151',
+  hierarchy:     '#d97706',
+  variety:       '#059669',
+  contrast:      '#be185d',
+  explore:       '#6b7280',
+};
+
+function SuggestionCard({ group, onAddAll, onAddOne, palette }) {
   const alreadyIn = hex => palette.some(c => c.hex.toUpperCase() === hex.toUpperCase());
+  const accent = INTENT_ACCENT[group.intent] ?? 'var(--accent)';
+  const newCount = group.colors.filter(c => !alreadyIn(c.hex)).length;
+
   return (
-    <div className="scheme-card">
-      <div className="scheme-card-header">
-        <div>
-          <div className="scheme-name">{scheme.name}</div>
-          <div className="scheme-desc">{scheme.description}</div>
+    <div className="suggestion-card" style={{ '--card-accent': accent }}>
+      <div className="suggestion-card-header">
+        <div className="suggestion-card-titles">
+          <div className="suggestion-card-name">{group.name}</div>
+          {group.reason && (
+            <div className="suggestion-card-reason">{group.reason}</div>
+          )}
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={onAddAll}>Add All</button>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={onAddAll}
+          disabled={newCount === 0}
+          style={{ flexShrink: 0 }}
+        >
+          {newCount === 0 ? '✓ All added' : `Add ${newCount > 1 ? `all ${newCount}` : 'color'}`}
+        </button>
       </div>
-      <div className="scheme-colors">
-        {scheme.colors.map((color, i) => (
-          <div key={i} style={{ position: 'relative', display: 'inline-block' }} title={`${color.name} — ${color.hex}`}>
-            <ColorSwatch hex={color.hex} size="sm" onClick={() => onAddOne(color.hex)} />
-            {alreadyIn(color.hex) && (
-              <span style={{
-                position: 'absolute', top: -4, right: -4,
-                width: 13, height: 13, borderRadius: '50%',
-                background: 'var(--green)', border: '2px solid white',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 7, color: 'white', fontWeight: 800, pointerEvents: 'none',
-              }}>✓</span>
-            )}
+      <div className="suggestion-card-colors">
+        {group.colors.map((color, i) => (
+          <div
+            key={i}
+            className={`suggestion-swatch-wrap ${alreadyIn(color.hex) ? 'in-palette' : ''}`}
+            title={`${color.name} — ${color.hex}${alreadyIn(color.hex) ? ' · already in palette' : ' · click to add'}`}
+            onClick={() => !alreadyIn(color.hex) && onAddOne(color.hex)}
+          >
+            <div className="suggestion-swatch" style={{ background: color.hex }} />
+            {alreadyIn(color.hex) && <span className="suggestion-swatch-check">✓</span>}
+            <span className="suggestion-swatch-hex">{color.hex}</span>
           </div>
         ))}
       </div>

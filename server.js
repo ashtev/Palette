@@ -116,8 +116,8 @@ const VARIANTS = [
 
 function angDistDeg(a, b) { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; }
 
-// ── Palette-aware completion suggestions ─────────────────────────────────────
-function getPaletteCompletionSuggestions(hexes, variant = 0) {
+// ── Smart adaptive palette suggestions ───────────────────────────────────────
+function getSmartSuggestions(hexes, variant = 0) {
   const v = VARIANTS[Math.max(0, Math.min(4, Number(variant) || 0))];
 
   const colorData = hexes
@@ -134,164 +134,246 @@ function getPaletteCompletionSuggestions(hexes, variant = 0) {
   const sinSum = colorData.reduce((sum, c) => sum + c.s * Math.sin(c.h * Math.PI / 180), 0);
   const cosSum = colorData.reduce((sum, c) => sum + c.s * Math.cos(c.h * Math.PI / 180), 0);
   const meanHue = ((Math.atan2(sinSum / totalSat, cosSum / totalSat) * 180 / Math.PI) + 360) % 360;
-
   const avgS = colorData.reduce((s, c) => s + c.s, 0) / colorData.length;
   const avgL = colorData.reduce((s, c) => s + c.l, 0) / colorData.length;
 
-  function pc(hue, sOvr, lOvr) {
-    const s = clamp((sOvr ?? avgS) * v.sMulti, 0.06, 1);
-    const l = clamp((lOvr ?? avgL) + v.lOff, 0.08, 0.90);
-    return toObj(mkColor(hue, s, l));
+  // ── Palette state analysis ────────────────────────────────────────────────
+  const hasLight        = colorData.some(c => c.l > 0.78);
+  const hasDark         = colorData.some(c => c.l < 0.22);
+  const hasNeutral      = colorData.some(c => c.s < 0.12);
+  const hasVibrantAccent = colorData.some(c => c.s > 0.55 && c.l > 0.30 && c.l < 0.72);
+  const overSaturated   = avgS > 0.60 && colorData.every(c => c.s > 0.45);
+
+  let hasAAContrast = false;
+  for (let i = 0; i < colorData.length && !hasAAContrast; i++) {
+    for (let j = i + 1; j < colorData.length && !hasAAContrast; j++) {
+      if (chroma.contrast(colorData[i].hex, colorData[j].hex) >= 4.5) hasAAContrast = true;
+    }
   }
 
-  const hues = colorData.map(c => c.h).sort((a, b) => a - b);
+  const chromatic = colorData.filter(c => c.s >= 0.15);
+  const warmCount = chromatic.filter(c => c.h < 65 || c.h > 295).length;
+  const coolCount = chromatic.filter(c => c.h >= 165 && c.h <= 265).length;
+  const isWarmDom = chromatic.length >= 3 && warmCount / chromatic.length >= 0.80;
+  const isCoolDom = chromatic.length >= 3 && coolCount / chromatic.length >= 0.80;
+  const tempSkew  = isWarmDom || isCoolDom;
 
-  // Score a candidate: contrast vs existing palette + bonus for passing AA against white or black.
-  // This penalises mid-tone colours (L ~0.4–0.6) that fail both white and black backgrounds.
+  const hues = colorData.map(c => c.h).sort((a, b) => a - b);
+  let maxGap = 0, gapStart = 0;
+  for (let i = 0; i < hues.length; i++) {
+    const gap = i < hues.length - 1 ? hues[i + 1] - hues[i] : (hues[0] + 360) - hues[i];
+    if (gap > maxGap) { maxGap = gap; gapStart = hues[i]; }
+  }
+  const gapMid    = (gapStart + maxGap / 2) % 360;
+  const compHue   = (meanHue + 180) % 360;
+  const hasComp   = hues.some(h => angDistDeg(h, compHue) < 35);
+
+  // ── Color generation helpers ──────────────────────────────────────────────
+  function pc(hue, sat, lBase) {
+    return toObj(mkColor(hue, clamp(sat * v.sMulti, 0.02, 1), clamp(lBase + v.lOff, 0.04, 0.97)));
+  }
+
   function a11yScore(hex) {
     try {
-      const existingScore = hexes.reduce((sum, ex) => {
+      const existing = hexes.reduce((sum, ex) => {
         const r = chroma.contrast(hex, ex);
         return sum + (r >= 4.5 ? 2 : r >= 3 ? 1 : 0);
       }, 0);
-      const vsWhite = chroma.contrast(hex, '#FFFFFF');
-      const vsBlack = chroma.contrast(hex, '#000000');
-      const bgBonus = Math.max(
-        vsWhite >= 4.5 ? 4 : vsWhite >= 3 ? 2 : 0,
-        vsBlack >= 4.5 ? 4 : vsBlack >= 3 ? 2 : 0,
-      );
-      return existingScore + bgBonus;
+      const vsW = chroma.contrast(hex, '#FFFFFF');
+      const vsB = chroma.contrast(hex, '#000000');
+      return existing + Math.max(vsW >= 4.5 ? 4 : vsW >= 3 ? 2 : 0, vsB >= 4.5 ? 4 : vsB >= 3 ? 2 : 0);
     } catch { return 0; }
   }
 
-  // From a pool of candidates, sort by accessibility score and keep best 6
-  function bestColors(pool) {
+  function best(pool) {
     return [...pool].sort((a, b) => a11yScore(b.hex) - a11yScore(a.hex)).slice(0, 6);
   }
 
-  const groups = [];
+  // ── Scenario detection + suggestion generation ────────────────────────────
+  const suggestions = [];
 
-  // 1. Fill the largest hue gap (if > 60°)
-  let maxGap = 0, gapStart = 0;
-  for (let i = 0; i < hues.length; i++) {
-    const next = hues[(i + 1) % hues.length];
-    const gap = i < hues.length - 1 ? next - hues[i] : (hues[0] + 360) - hues[i];
-    if (gap > maxGap) { maxGap = gap; gapStart = hues[i]; }
-  }
-  const gapMid = (gapStart + maxGap / 2) % 360;
-  // Extra lightness levels added to every pool so a11y sorting has room to work
-  function pool(hue, sat, extras = []) {
-    return [
-      pc(hue, sat, clamp(avgL, 0.08, 0.90)),
-      pc(hue, sat, clamp(avgL + 0.18, 0.08, 0.90)),
-      pc(hue, sat * 0.70, clamp(avgL + 0.12, 0.08, 0.90)),
-      pc(hue, sat, clamp(avgL - 0.15, 0.08, 0.90)),
-      pc(hue, sat, 0.88),  // light extreme
-      pc(hue, sat, 0.10),  // dark extreme
-      ...extras,
-    ];
-  }
-
-  if (maxGap > 60) {
-    const desc = maxGap > 150
-      ? `There's a ${Math.round(maxGap)}° gap in your palette hues — these colors would bridge it nicely.`
-      : `Fill the ${Math.round(maxGap)}° hue gap to add variety and visual range.`;
-    groups.push({
-      id: 'fill-gap', name: 'Fill the Gap', description: desc,
-      colors: bestColors(pool(gapMid, avgS, [pc((gapMid + 20) % 360, avgS), pc((gapMid - 20 + 360) % 360, avgS)])),
+  // 1. No AA contrast anywhere → accessibility emergency
+  if (!hasAAContrast) {
+    suggestions.push({
+      id: 'improve-accessibility', intent: 'accessibility',
+      name: 'Improve accessibility',
+      reason: "No two colors in your palette achieve 4.5:1 contrast — you can't create readable text yet.",
+      colors: best([
+        ...[0.94, 0.90, 0.85, 0.80].map(l => pc(meanHue, 0.05, l)),
+        ...[0.08, 0.12, 0.16, 0.20].map(l => pc(meanHue, 0.12, l)),
+      ]),
     });
   }
 
-  // 2. Add a complement (if no color sits within 35° of the mean complement)
-  const compHue = (meanHue + 180) % 360;
-  const hasComplement = hues.some(h => angDistDeg(h, compHue) < 35);
-  if (!hasComplement) {
-    groups.push({
-      id: 'add-complement', name: 'Add Contrast',
-      description: 'None of your colors contrast sharply with the others. A complementary hue would make accents and CTAs pop.',
-      colors: bestColors(pool(compHue, avgS, [pc((compHue + 25) % 360, avgS), pc((compHue - 25 + 360) % 360, avgS)])),
-    });
-  }
-
-  // 3. Temperature balance — warm: h < 65 || h > 295; cool: h >= 165 && h <= 265
-  const isWarm = h => h < 65 || h > 295;
-  const isCool = h => h >= 165 && h <= 265;
-  const chromatic = colorData.filter(c => c.s > 0.15);
-  if (chromatic.length >= 2) {
-    const warmC = chromatic.filter(c => isWarm(c.h)).length;
-    const coolC = chromatic.filter(c => isCool(c.h)).length;
-    const total = chromatic.length;
-    const tooWarm = warmC / total > 0.75;
-    const tooCool = coolC / total > 0.75;
-    if (tooWarm || tooCool) {
-      const balHue = tooWarm ? 210 : 30;
-      groups.push({
-        id: 'balance-temp', name: 'Balance the Temperature',
-        description: `Your palette skews ${tooWarm ? 'warm' : 'cool'}. A ${tooWarm ? 'cool' : 'warm'} tone would balance it out.`,
-        colors: bestColors(pool(balHue, avgS, [pc((balHue + 20) % 360, avgS), pc((balHue - 20 + 360) % 360, avgS)])),
-      });
-    }
-  }
-
-  // 4. Complete the triad — if two colors are ~90–150° apart, suggest the third vertex
-  let triadDone = false;
-  for (let i = 0; i < colorData.length && !triadDone; i++) {
-    for (let j = i + 1; j < colorData.length && !triadDone; j++) {
-      const d = angDistDeg(colorData[i].h, colorData[j].h);
-      if (d >= 90 && d <= 150) {
-        const thirdH = (colorData[i].h + 120) % 360;
-        const altH   = (colorData[i].h + 240) % 360;
-        if (hues.every(h => angDistDeg(h, thirdH) > 30 && angDistDeg(h, altH) > 30)) {
-          triadDone = true;
-          groups.push({
-            id: 'complete-triad', name: 'Complete the Triad',
-            description: `${colorData[i].hex} and ${colorData[j].hex} are almost triadic — add the third hue to complete the set.`,
-            colors: bestColors(pool(thirdH, avgS, [pc(altH, avgS), pc(altH, avgS, 0.88), pc(altH, avgS, 0.10)])),
-          });
-        }
-      }
-    }
-  }
-
-  // 5. Add a light anchor (L > 0.75) if missing
-  if (!colorData.some(c => c.l > 0.75)) {
-    groups.push({
-      id: 'add-light-anchor', name: 'Add a Light Anchor',
-      description: 'Your palette has no light base color. Add one for backgrounds, surfaces, or airy accents.',
-      colors: bestColors([0.96, 0.90, 0.84, 0.78, 0.72, 0.66, 0.62, 0.58].map(l => pc(meanHue, avgS * 0.08, l))),
-    });
-  }
-
-  // 6. Add a dark anchor (L < 0.25) if missing
-  if (!colorData.some(c => c.l < 0.25)) {
-    groups.push({
-      id: 'add-dark-anchor', name: 'Add a Dark Anchor',
-      description: 'Your palette has no dark color. Add one for text, shadows, or depth.',
-      colors: bestColors([0.08, 0.12, 0.17, 0.22, 0.28, 0.35, 0.40, 0.45].map(l => pc(meanHue, avgS * 0.12, l))),
-    });
-  }
-
-  // Fallback: palette is already well-balanced
-  if (groups.length === 0) {
-    groups.push({
-      id: 'explore', name: 'Explore Variations',
-      description: 'Your palette looks well-balanced! Here are some variations to explore.',
-      colors: bestColors(pool(meanHue, avgS * 0.45, [
-        pc((meanHue + 30) % 360, avgS), pc((meanHue - 30 + 360) % 360, avgS),
-        pc((meanHue + 60) % 360, avgS), pc((meanHue - 60 + 360) % 360, avgS),
+  // 2. No dark anchor → can't do text or depth
+  if (!hasDark) {
+    suggestions.push({
+      id: 'add-dark', intent: 'depth',
+      name: 'Add a dark anchor',
+      reason: "Your palette has no color dark enough for headings, body text, or depth. This is a functional gap.",
+      colors: best([0.07, 0.10, 0.14, 0.17, 0.20, 0.24].flatMap(l => [
+        pc(meanHue, 0.06, l), pc(meanHue, 0.12, l),
       ])),
     });
   }
 
-  // Neutrals anchored to the palette's mean hue
-  const nSatL = clamp(avgS * 0.07, 0.01, 0.07);
-  const nSatD = clamp(avgS * 0.12, 0.02, 0.12);
-  const neutrals = {
-    lights: [0.96, 0.88, 0.80, 0.72, 0.64].map(l => toObj(mkColor(meanHue, nSatL, l))),
-    darks:  [0.08, 0.13, 0.20, 0.28, 0.36].map(l => toObj(mkColor(meanHue, nSatD, l))),
-  };
+  // 3. No light anchor → can't do backgrounds or surfaces
+  if (!hasLight) {
+    suggestions.push({
+      id: 'add-light', intent: 'space',
+      name: 'Add a light anchor',
+      reason: "Your palette has no light color for backgrounds or surfaces. Without one, UI layouts have nowhere to breathe.",
+      colors: best([0.95, 0.91, 0.87, 0.83, 0.79, 0.75].flatMap(l => [
+        pc(meanHue, 0.04, l), pc(meanHue, 0.07, l),
+      ])),
+    });
+  }
 
-  return { harmonies: groups.slice(0, 4), neutrals, mode: 'palette' };
+  // 4. Over-saturated → needs muted support colors
+  if (overSaturated && suggestions.length < 4) {
+    suggestions.push({
+      id: 'reduce-saturation', intent: 'balance',
+      name: 'Balance your saturation',
+      reason: `Your palette averages ${Math.round(avgS * 100)}% saturation — it needs softer, muted tones so the eye has somewhere to rest.`,
+      colors: best([0.90, 0.78, 0.58, 0.38, 0.18].flatMap(l => [
+        pc(meanHue, 0.05, l), pc(meanHue, 0.08, l),
+      ])),
+    });
+  }
+
+  // 5. No neutral at all (and not already covered by over-saturated)
+  if (!hasNeutral && !overSaturated && colorData.length >= 3 && suggestions.length < 4) {
+    suggestions.push({
+      id: 'add-neutral', intent: 'grounding',
+      name: 'Your palette needs grounding',
+      reason: "Every color in your palette is saturated. Neutral tones are essential for backgrounds, borders, and resting areas in any real UI.",
+      colors: best([0.96, 0.88, 0.72, 0.50, 0.28, 0.12].flatMap(l => [
+        pc(meanHue, 0.05, l), pc(meanHue, 0.08, l),
+      ])),
+    });
+  }
+
+  // 6. Has light + dark but no vibrant accent → needs hierarchy
+  if (hasLight && hasDark && !hasVibrantAccent && suggestions.length < 4) {
+    suggestions.push({
+      id: 'strengthen-hierarchy', intent: 'hierarchy',
+      name: 'Strengthen visual hierarchy',
+      reason: "You have light and dark values but no vibrant accent. Nothing stands out as a CTA, link color, or brand anchor.",
+      colors: best([0.42, 0.48, 0.54, 0.60, 0.50, 0.44].flatMap(l => [
+        pc(meanHue, 0.78, l), pc(compHue, 0.75, l),
+      ])),
+    });
+  }
+
+  // 7. Large hue gap (only if no structural issues dominate)
+  if (maxGap > 70 && suggestions.filter(s => ['improve-accessibility','add-dark','add-light'].includes(s.id)).length === 0 && suggestions.length < 4) {
+    suggestions.push({
+      id: 'fill-gap', intent: 'variety',
+      name: 'Fill the hue gap',
+      reason: `There's a ${Math.round(maxGap)}° gap in your palette's hue spectrum. These colors bridge it and add visual variety.`,
+      colors: best([
+        pc(gapMid, avgS, avgL),
+        pc(gapMid, avgS, clamp(avgL + 0.22, 0.08, 0.92)),
+        pc(gapMid, avgS * 0.65, clamp(avgL + 0.15, 0.08, 0.92)),
+        pc(gapMid, avgS, clamp(avgL - 0.15, 0.08, 0.92)),
+        pc(gapMid, avgS, 0.90), pc(gapMid, avgS, 0.10),
+        pc((gapMid + 22) % 360, avgS, avgL), pc((gapMid - 22 + 360) % 360, avgS, avgL),
+      ]),
+    });
+  }
+
+  // 8. No complementary hue
+  if (!hasComp && !suggestions.some(s => s.id === 'fill-gap') && suggestions.length < 4) {
+    suggestions.push({
+      id: 'add-complement', intent: 'contrast',
+      name: 'Add a contrasting hue',
+      reason: "None of your colors contrast sharply in hue. A complementary tone makes accents, CTAs, and callouts pop.",
+      colors: best([
+        pc(compHue, avgS, avgL),
+        pc(compHue, avgS, clamp(avgL + 0.22, 0.08, 0.92)),
+        pc(compHue, avgS, clamp(avgL - 0.20, 0.08, 0.92)),
+        pc(compHue, avgS, 0.90), pc(compHue, avgS, 0.10),
+        pc((compHue + 25) % 360, avgS, avgL), pc((compHue - 25 + 360) % 360, avgS, avgL),
+      ]),
+    });
+  }
+
+  // 9. Temperature skew
+  if (tempSkew && suggestions.length < 4) {
+    const balHue = isWarmDom ? 210 : 30;
+    suggestions.push({
+      id: 'balance-temperature', intent: 'balance',
+      name: 'Balance the temperature',
+      reason: `Your palette is ${isWarmDom ? 'warm' : 'cool'}-heavy. A ${isWarmDom ? 'cool' : 'warm'} tone adds range and prevents visual monotony.`,
+      colors: best([avgL, clamp(avgL + 0.22, 0.08, 0.92), clamp(avgL - 0.22, 0.08, 0.92), 0.90, 0.10].map(l =>
+        pc(balHue, avgS, l)
+      )),
+    });
+  }
+
+  // 10. Complete a near-triad
+  if (suggestions.length < 3) {
+    for (let i = 0; i < colorData.length; i++) {
+      for (let j = i + 1; j < colorData.length; j++) {
+        const d = angDistDeg(colorData[i].h, colorData[j].h);
+        if (d >= 90 && d <= 150) {
+          const thirdH = (colorData[i].h + 120) % 360;
+          if (hues.every(h => angDistDeg(h, thirdH) > 30)) {
+            suggestions.push({
+              id: 'complete-triad', intent: 'variety',
+              name: 'Complete the triad',
+              reason: `${colorData[i].hex} and ${colorData[j].hex} are near-triadic — the third hue would complete a harmonically balanced set.`,
+              colors: best([
+                pc(thirdH, avgS, avgL),
+                pc(thirdH, avgS, 0.90), pc(thirdH, avgS, 0.10),
+                pc(thirdH, avgS, clamp(avgL + 0.22, 0.08, 0.92)),
+              ]),
+            });
+          }
+          break;
+        }
+      }
+      if (suggestions.some(s => s.id === 'complete-triad')) break;
+    }
+  }
+
+  // Fallback — palette is solid, suggest optional refinements
+  if (suggestions.length === 0) {
+    suggestions.push({
+      id: 'explore', intent: 'explore',
+      name: 'Explore refinements',
+      reason: "Your palette looks well-balanced. Here are some optional variations to consider.",
+      colors: best([
+        pc(meanHue, avgS * 0.45, clamp(avgL + 0.14, 0.08, 0.92)),
+        pc((meanHue + 30) % 360, avgS, avgL),
+        pc((meanHue - 30 + 360) % 360, avgS, avgL),
+        pc((meanHue + 60) % 360, avgS, avgL),
+        pc(meanHue, avgS * 0.18, 0.94),
+        pc(meanHue, avgS * 0.18, 0.08),
+      ]),
+    });
+  }
+
+  // ── Adaptive header message ───────────────────────────────────────────────
+  let headerMessage;
+  const ids = suggestions.map(s => s.id);
+  if (ids.includes('improve-accessibility')) {
+    headerMessage = 'These suggestions improve readability and accessibility';
+  } else if (ids.includes('add-dark') && ids.includes('add-light')) {
+    headerMessage = 'Your palette is missing functional anchor colors';
+  } else if (ids.includes('add-dark') || ids.includes('add-light')) {
+    headerMessage = 'Your palette could use one more functional anchor';
+  } else if (ids.includes('reduce-saturation') || ids.includes('add-neutral')) {
+    headerMessage = 'Your palette needs more balance and breathing room';
+  } else if (ids.includes('strengthen-hierarchy')) {
+    headerMessage = 'Your palette has structure — these sharpen it';
+  } else if (ids.length === 1 && ids[0] === 'explore') {
+    headerMessage = 'Your palette is solid — here are optional refinements';
+  } else {
+    headerMessage = 'These suggestions address specific gaps in your palette';
+  }
+
+  return { suggestions: suggestions.slice(0, 4), headerMessage, mode: 'palette' };
 }
 
 // ── POST /api/suggestions ─────────────────────────────────────────────────────
@@ -301,7 +383,7 @@ app.post('/api/suggestions', (req, res) => {
 
   // Palette-aware mode when 2+ colors are provided
   if (Array.isArray(colorsArr) && colorsArr.length >= 2) {
-    const result = getPaletteCompletionSuggestions(colorsArr, variant);
+    const result = getSmartSuggestions(colorsArr, variant);
     if (!result) return res.status(400).json({ error: 'Need at least 2 valid colors' });
     return res.json(result);
   }
@@ -628,6 +710,264 @@ app.post('/api/harmonize', (req, res) => {
       angle: Math.round(((c.h - baseHue) + 360) % 360),
     })),
   });
+});
+
+// ── POST /api/analyze ─────────────────────────────────────────────────────────
+
+function explainContrastFailure(fg, bg) {
+  try {
+    const fgL = chroma(fg).hsl()[2];
+    const bgL = chroma(bg).hsl()[2];
+    const fgMid = fgL > 0.3 && fgL < 0.7;
+    const bgMid = bgL > 0.3 && bgL < 0.7;
+    if (fgMid && bgMid) {
+      return `Both colors are mid-toned (${Math.round(fgL*100)}% and ${Math.round(bgL*100)}% lightness) — need one dark and one light to achieve readable contrast.`;
+    }
+    if (fgMid) {
+      const dir = bgL > 0.5 ? 'darker' : 'lighter';
+      return `Foreground is mid-toned at ${Math.round(fgL*100)}% lightness — needs to be ${dir} to contrast against this ${bgL > 0.5 ? 'light' : 'dark'} background.`;
+    }
+    if (bgMid) {
+      return `Background at ${Math.round(bgL*100)}% lightness is in the mid-tone danger zone — difficult for any foreground to achieve 4.5:1 against it.`;
+    }
+    if (Math.abs(fgL - bgL) < 0.2) {
+      return `Colors are too similar in lightness (${Math.round(fgL*100)}% vs ${Math.round(bgL*100)}%) — need greater lightness difference for readable text.`;
+    }
+    return `Contrast falls short of the 4.5:1 threshold required for normal-sized text (WCAG AA).`;
+  } catch { return 'Contrast is too low for readable text.'; }
+}
+
+function analyzeIssues(colorData, meanHue, avgS) {
+  const issues = [];
+
+  if (!colorData.some(c => c.l < 0.25)) {
+    const hex = mkColor(meanHue, Math.min(avgS * 0.15, 0.10), 0.09);
+    issues.push({
+      id: 'no-dark', severity: 'error',
+      title: 'No dark color for text',
+      explanation: "You have no colors dark enough for body text. This means you can't create readable text on light backgrounds — a core requirement for any brand palette.",
+      fix: { hex, name: nameColor(hex), impact: 'A text/heading color that achieves 14:1+ contrast on white backgrounds' },
+    });
+  }
+
+  if (!colorData.some(c => c.l > 0.75)) {
+    const hex = mkColor(meanHue, Math.min(avgS * 0.06, 0.05), 0.96);
+    issues.push({
+      id: 'no-light', severity: 'error',
+      title: 'No light color for backgrounds',
+      explanation: "You have no colors light enough for backgrounds or surfaces. Without a light base, your palette can't support standard UI layouts.",
+      fix: { hex, name: nameColor(hex), impact: 'A clean background that makes all your other colors readable' },
+    });
+  }
+
+  const lValues = colorData.map(c => c.l);
+  const lSpread = colorData.length > 1 ? Math.max(...lValues) - Math.min(...lValues) : 0;
+  if (lSpread < 0.30 && colorData.length >= 3) {
+    const avgLv = lValues.reduce((s, v) => s + v, 0) / lValues.length;
+    const fixL = avgLv > 0.5 ? 0.08 : 0.94;
+    const hex = mkColor(meanHue, avgS * 0.10, fixL);
+    issues.push({
+      id: 'flat-lightness', severity: 'warning',
+      title: 'Flat lightness — missing depth',
+      explanation: `All colors are within a ${Math.round(lSpread * 100)}% lightness range. A palette with no dark-to-light contrast can't support both text and backgrounds at the same time.`,
+      fix: { hex, name: nameColor(hex), impact: `Adds a ${fixL < 0.3 ? 'dark' : 'light'} anchor, expanding your usable lightness range` },
+    });
+  }
+
+  if (colorData.length >= 3 && !colorData.some(c => c.s < 0.15)) {
+    const hex = mkColor(meanHue, 0.06, 0.92);
+    issues.push({
+      id: 'no-neutral', severity: 'warning',
+      title: 'No neutral colors',
+      explanation: "Every color in your palette is saturated. Without a neutral, your UI will feel overwhelming — neutrals give the eye somewhere to rest and handle backgrounds, borders, and text.",
+      fix: { hex, name: nameColor(hex), impact: 'A palette-tinted neutral — harmonious, and usable for any surface or border' },
+    });
+  }
+
+  const satCount = colorData.filter(c => c.s > 0.60).length;
+  if (colorData.length >= 3 && satCount / colorData.length > 0.75 && !issues.some(i => i.id === 'no-neutral')) {
+    const hex = mkColor(meanHue, 0.07, 0.90);
+    issues.push({
+      id: 'all-saturated', severity: 'warning',
+      title: 'Too many saturated colors',
+      explanation: `${satCount} of your ${colorData.length} colors are highly saturated. This creates visual noise — the eye has nowhere to rest.`,
+      fix: { hex, name: nameColor(hex), impact: 'A soft palette-tinted neutral that reduces visual noise without breaking the hue theme' },
+    });
+  }
+
+  const maxSat = colorData.length > 0 ? Math.max(...colorData.map(c => c.s)) : 0;
+  if (maxSat < 0.50 && colorData.length >= 3) {
+    const mostSat = colorData.reduce((a, b) => a.s > b.s ? a : b);
+    const hex = mkColor(mostSat.h, Math.min(mostSat.s + 0.35, 0.85), mostSat.l);
+    issues.push({
+      id: 'no-dominant', severity: 'warning',
+      title: 'No dominant brand color',
+      explanation: `Your most saturated color is only ${Math.round(maxSat * 100)}% saturated. Without a dominant hue nothing draws the eye — no clear CTA or brand anchor.`,
+      fix: { hex, name: nameColor(hex), impact: 'A vibrant version of your palette\'s lead color, ready to serve as a CTA or hero accent' },
+      targetHex: mostSat.hex,
+    });
+  }
+
+  const chromatic = colorData.filter(c => c.s > 0.15);
+  if (chromatic.length >= 3) {
+    const warm = chromatic.filter(c => c.h < 65 || c.h > 295).length;
+    const cool = chromatic.filter(c => c.h >= 165 && c.h <= 265).length;
+    const wR = warm / chromatic.length;
+    const cR = cool / chromatic.length;
+    if (wR >= 0.80 || cR >= 0.80) {
+      const isWarm = wR >= 0.80;
+      const hex = mkColor(isWarm ? 210 : 30, avgS * 0.70, 0.55);
+      issues.push({
+        id: 'temperature-skew', severity: 'warning',
+        title: `${isWarm ? 'Warm' : 'Cool'}-heavy temperature`,
+        explanation: `${Math.round((isWarm ? wR : cR) * 100)}% of your chromatic colors are ${isWarm ? 'warm' : 'cool'}. Mixing temperatures adds visual interest and range.`,
+        fix: { hex, name: nameColor(hex), impact: `A ${isWarm ? 'cool' : 'warm'} tone to balance the palette's temperature` },
+      });
+    }
+  }
+
+  for (let i = 0; i < colorData.length && !issues.some(x => x.id === 'redundant-pair'); i++) {
+    for (let j = i + 1; j < colorData.length; j++) {
+      if (angDistDeg(colorData[i].h, colorData[j].h) < 15 && Math.abs(colorData[i].l - colorData[j].l) < 0.12) {
+        const hex = mkColor(colorData[j].h, colorData[j].s, clamp(colorData[j].l + 0.28, 0.08, 0.95));
+        issues.push({
+          id: 'redundant-pair', severity: 'info',
+          title: 'Redundant colors detected',
+          explanation: `${colorData[i].hex} and ${colorData[j].hex} are nearly identical — same hue, similar lightness. They take up two palette slots without adding visual range.`,
+          fix: { hex, name: nameColor(hex), impact: 'Differentiates this color by shifting its lightness away from its duplicate' },
+          targetHex: colorData[j].hex,
+        });
+        break;
+      }
+    }
+  }
+
+  return issues;
+}
+
+function labelScore(score, max) {
+  const p = score / max;
+  if (p >= 0.85) return 'Excellent';
+  if (p >= 0.65) return 'Good';
+  if (p >= 0.40) return 'Fair';
+  return 'Needs Work';
+}
+
+function computeHealth(colorData, pairs, issues) {
+  const n = colorData.length;
+
+  // Accessibility (0–30)
+  let accessibility = n < 2 ? 15 : 0;
+  if (pairs.length > 0) {
+    const pct = pairs.filter(p => p.normalAA).length / pairs.length;
+    if (pct === 1)       accessibility = 30;
+    else if (pct >= 0.75) accessibility = 22;
+    else if (pct >= 0.5)  accessibility = 15;
+    else if (pct >= 0.25) accessibility = 8;
+    else                  accessibility = 3;
+  }
+
+  // Tonal Balance (0–20)
+  const lVals = colorData.map(c => c.l);
+  const lSpread = n > 1 ? Math.max(...lVals) - Math.min(...lVals) : 0;
+  let tonalBalance = 0;
+  if      (lSpread > 0.65) tonalBalance = 20;
+  else if (lSpread > 0.45) tonalBalance = 15;
+  else if (lSpread > 0.30) tonalBalance = 10;
+  else if (lSpread > 0.15) tonalBalance = 5;
+  if (colorData.some(c => c.l > 0.75) && colorData.some(c => c.l < 0.25) && tonalBalance < 20)
+    tonalBalance = Math.min(tonalBalance + 5, 20);
+
+  // Functional Variety (0–20)
+  let zones = 0;
+  if (colorData.some(c => c.l < 0.25))                           zones++;
+  if (colorData.some(c => c.l > 0.75))                           zones++;
+  if (colorData.some(c => c.s > 0.5 && c.l > 0.35 && c.l < 0.65)) zones++;
+  if (colorData.some(c => c.s < 0.15))                           zones++;
+  const functionalVariety = Math.round((zones / 4) * 20);
+
+  // Cohesion (0–15)
+  let cohesion = 15;
+  cohesion -= issues.filter(i => i.id === 'redundant-pair' || i.id === 'temperature-skew').length * 5;
+  const hueDiversity = new Set(colorData.filter(c => c.s > 0.15).map(c => Math.floor(c.h / 60))).size;
+  if (hueDiversity > 4) cohesion -= 4;
+  cohesion = Math.max(0, cohesion);
+
+  // Neutral Support (0–15)
+  const nc = colorData.filter(c => c.s < 0.15).length;
+  const neutralSupport = nc >= 3 ? 15 : nc === 2 ? 11 : nc === 1 ? 7 : 0;
+
+  const overall = accessibility + tonalBalance + functionalVariety + cohesion + neutralSupport;
+  return {
+    overall,
+    breakdown: {
+      accessibility:     { score: accessibility,    max: 30, label: labelScore(accessibility, 30) },
+      tonalBalance:      { score: tonalBalance,      max: 20, label: labelScore(tonalBalance, 20) },
+      functionalVariety: { score: functionalVariety, max: 20, label: labelScore(functionalVariety, 20) },
+      cohesion:          { score: cohesion,          max: 15, label: labelScore(cohesion, 15) },
+      neutralSupport:    { score: neutralSupport,    max: 15, label: labelScore(neutralSupport, 15) },
+    },
+  };
+}
+
+function getFunctionalPairs(pairs, colorData) {
+  if (pairs.length === 0) return null;
+  const sorted = [...pairs].sort((a, b) => b.ratio - a.ratio);
+  const bestText = sorted[0] ?? null;
+  const ctaPairs = pairs
+    .filter(p => {
+      const bg = colorData.find(c => c.hex === p.background);
+      return bg && bg.s > 0.35 && bg.l > 0.25 && bg.l < 0.75;
+    })
+    .sort((a, b) => b.ratio - a.ratio);
+  return { bestText, bestCTA: ctaPairs[0] ?? null };
+}
+
+app.post('/api/analyze', (req, res) => {
+  const { colors } = req.body;
+  if (!Array.isArray(colors) || colors.length < 1)
+    return res.status(400).json({ error: 'colors required' });
+
+  const valid = colors.filter(c => { try { chroma(c); return true; } catch { return false; } });
+  if (valid.length < 1)
+    return res.status(400).json({ error: 'No valid colors' });
+
+  const colorData = valid.map(hex => {
+    const [h, s, l] = chroma(hex).hsl();
+    return { hex: hex.toUpperCase(), h: (isNaN(h) || h == null) ? 0 : h, s, l };
+  });
+
+  const totalSat = colorData.reduce((sum, c) => sum + c.s, 0) || 1;
+  const sinSum = colorData.reduce((sum, c) => sum + c.s * Math.sin(c.h * Math.PI / 180), 0);
+  const cosSum = colorData.reduce((sum, c) => sum + c.s * Math.cos(c.h * Math.PI / 180), 0);
+  const meanHue = ((Math.atan2(sinSum / totalSat, cosSum / totalSat) * 180 / Math.PI) + 360) % 360;
+  const avgS = colorData.reduce((s, c) => s + c.s, 0) / colorData.length;
+
+  const pairs = [];
+  if (valid.length >= 2) {
+    for (let i = 0; i < valid.length; i++) {
+      for (let j = 0; j < valid.length; j++) {
+        if (i === j) continue;
+        const ratio = Math.round(chroma.contrast(valid[i], valid[j]) * 100) / 100;
+        const normalAA = ratio >= 4.5;
+        const rawFix = !normalAA ? findAccessibleForeground(valid[i], valid[j], 4.5) : null;
+        const quickFix = rawFix ? { ...rawFix, label: makeFixLabel(valid[i], rawFix.hex) } : null;
+        const why = !normalAA ? explainContrastFailure(valid[i], valid[j]) : null;
+        pairs.push({
+          foreground: valid[i].toUpperCase(), background: valid[j].toUpperCase(),
+          ratio, normalAA, normalAAA: ratio >= 7, largeAA: ratio >= 3, largeAAA: ratio >= 4.5,
+          quickFix, why,
+        });
+      }
+    }
+    pairs.sort((a, b) => b.ratio - a.ratio);
+  }
+
+  const issues = analyzeIssues(colorData, meanHue, avgS);
+  const health = computeHealth(colorData, pairs, issues);
+  const functionalPairs = valid.length >= 2 ? getFunctionalPairs(pairs, colorData) : null;
+
+  res.json({ health, issues, pairs, functionalPairs });
 });
 
 // ── POST /api/accessibility ───────────────────────────────────────────────────
