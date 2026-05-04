@@ -15,7 +15,7 @@ The right panel is now a live intelligent assistant. As you add colors it automa
 - Identifies your **best color combinations** for text and CTA buttons
 - Shows **why** each contrast pair fails in plain English (not just the ratio)
 
-### Smart Suggestions™ — Fully Rebuilt
+### Smart Suggestion — Fully Rebuilt
 The suggestion system now analyzes your palette before generating anything, then surfaces only what actually needs fixing:
 
 | Scenario | What triggers it |
